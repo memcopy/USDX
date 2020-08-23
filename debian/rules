@@ -25,6 +25,9 @@ override_dh_auto_clean:
 	dh_auto_clean
 	-rm config.log src/config-linux.inc
 	-rm game/link.res
+	-rm CMakeFiles/CMakeOutput.log
+	-rm CMakeFiles/CMakeSystem.cmake
+	-rm src/lib/openCV3/Makefile
 
 
 override_dh_install:
@@ -32,6 +35,7 @@ override_dh_install:
 	rm debian/ultrastardx/usr/share/games/ultrastardx/fonts/DejaVu/*
 	rm debian/ultrastardx/usr/share/games/ultrastardx/fonts/FreeSans/*
 	rm debian/ultrastardx/usr/share/games/ultrastardx/fonts/wqy-microhei/*
+	rm debian/ultrastardx//usr/share/games/ultrastardx/fonts/NotoSans/*
 	rm debian/ultrastardx/usr/share/games/ultrastardx/LICENSE
 	@# all needed files are copied manually in ultrastardx.install
 	rm debian/ultrastardx/usr/share/games/ultrastardx/languages/*
