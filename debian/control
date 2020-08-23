@@ -26,7 +26,6 @@ Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends},
             fonts-noto
 Recommends: projectm-data,
-            ttf-bitstream-vera,
             fonts-dejavu-core, fonts-freefont-ttf
 Suggests: fonts-wqy-microhei, fonts-noto-cjk
 Description: Free and Open Source karaoke game
