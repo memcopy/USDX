@@ -49,11 +49,6 @@ uses
 type
 
   TScreenMain = class(TMenu)
-  private
-    { ticks when the user interacted, used to start credits
-      after a period of time w/o user interaction }
-    UserInteractionTicks: cardinal;
-
   public
     TextDescription:     integer;
     TextDescriptionLong: integer;
@@ -69,8 +64,6 @@ type
   end;
 
 const
-  { start credits after 60 seconds w/o interaction }
-  TicksUntilCredits = 5 * 60 * 1000;
   ID = 'ID_001';   //for help system
 
 var
@@ -86,7 +79,6 @@ uses
   ULog,
   UNote,
   UParty,
-  UScreenCredits,
   USkins,
   USongs,
   UTexture,
@@ -99,22 +91,19 @@ var
 begin
   Result := true;
 
-  { reset user interaction timer }
-  UserInteractionTicks := SDL_GetTicks;
-
   SDL_ModState := SDL_GetModState and (KMOD_LSHIFT + KMOD_RSHIFT +
     KMOD_LCTRL + KMOD_RCTRL + KMOD_LALT + KMOD_RALT);
 
   if (PressedDown) then
   begin // Key Down
         // check normal keys
-    case UCS4UpperCase(CharCode) of
-      Ord('S'): begin
+    case PressedKey of
+      SDLK_S: begin
         FadeTo(@ScreenName, SoundLib.Start);
         Exit;
       end;
 
-      Ord('P'): begin
+      SDLK_P: begin
         if (Ini.Players >= 1) and (Party.ModesAvailable) then
         begin
           FadeTo(@ScreenPartyOptions, SoundLib.Start);
@@ -122,43 +111,43 @@ begin
         end;
       end;
 
-      Ord('J'): begin
+      SDLK_J: begin
         FadeTo(@ScreenJukeboxPlaylist, SoundLib.Start);
         Exit;
       end;
 
-      Ord('R'): begin
+      SDLK_R: begin
         UGraphic.UnLoadScreens();
         Theme.LoadTheme(Ini.Theme, Ini.Color);
         UGraphic.LoadScreens(USDXVersionStr);
       end;
 
-      Ord('T'): begin
+      SDLK_T: begin
         FadeTo(@ScreenStatMain, SoundLib.Start);
         Exit;
       end;
 
-      Ord('E'): begin
+      SDLK_E: begin
         FadeTo(@ScreenEdit, SoundLib.Start);
         Exit;
       end;
 
-      Ord('O'): begin
+      SDLK_O: begin
         FadeTo(@ScreenOptions, SoundLib.Start);
         Exit;
       end;
 
-      Ord('A'): begin
+      SDLK_A: begin
         FadeTo(@ScreenAbout, SoundLib.Start);
         Exit;
       end;
 
-      Ord('C'): begin
+      SDLK_C: begin
          FadeTo(@ScreenCredits, SoundLib.Start);
          Exit;
       end;
 
-      Ord('Q'): begin
+      SDLK_Q: begin
         Result := false;
         Exit;
       end;
@@ -285,9 +274,6 @@ function TScreenMain.ParseMouse(MouseButton: integer; BtnDown: boolean; X, Y: in
 begin
   // default mouse behaviour
   Result := inherited ParseMouse(MouseButton, BtnDown, X, Y);
-
-  { reset user interaction timer }
-  UserInteractionTicks := SDL_GetTicks;
 end;
 
 constructor TScreenMain.Create;
@@ -336,9 +322,6 @@ begin
   * at the moment there is no better place for this
   *}
   Party.Clear;
-
-  { reset user interaction timer }
-  UserInteractionTicks := SDL_GetTicks;
 end;
 
 function TScreenMain.Draw: boolean;
@@ -352,12 +335,6 @@ begin
       WantSoftwareRenderingMsg := false;
       ScreenPopupError.ShowPopup(Language.Translate('ERROR_SOFTWARE_RENDERING'));
     end;
-  end;
-
-  { start credits after a period w/o user interaction }
-  if (UserInteractionTicks + TicksUntilCredits < SDL_GetTicks) then
-  begin
-    FadeTo(@ScreenCredits, SoundLib.Start);
   end;
 end;
 

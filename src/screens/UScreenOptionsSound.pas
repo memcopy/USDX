@@ -70,8 +70,8 @@ begin
   if (PressedDown) then
   begin // Key Down
         // check normal keys
-    case UCS4UpperCase(CharCode) of
-      Ord('Q'):
+    case PressedKey of
+      SDLK_Q:
       begin
         Result := false;
         Exit;
@@ -136,6 +136,12 @@ begin
       SoundLib.StartBgMusic
     else
       SoundLib.PauseBgMusic;
+  end
+  else if (SelInteraction = 5) then
+  begin
+    // preview volume, restart the background music so it uses the new volume
+    SoundLib.PauseBgMusic;
+    SoundLib.StartBgMusic;
   end;
   
 end;

@@ -98,6 +98,10 @@ type
 
       // static
       function AddStatic(ThemeStatic: TThemeStatic): integer; overload;
+      function AddStaticRectangle(static: TThemeStaticRectangle): integer;
+      function AddStaticAlphaRectangle(static: TThemeStaticAlphaRectangle): integer;
+      function AddStaticColorRectangle(static: TThemeStaticColorRectangle): integer;
+      function AddStaticPosition(static: TThemePosition): integer;
       function AddStatic(X, Y, W, H: real; const TexName: IPath): integer; overload;
       function AddStatic(X, Y, W, H: real; const TexName: IPath; Typ: TTextureType): integer; overload;
       function AddStatic(X, Y, W, H: real; ColR, ColG, ColB: real; const TexName: IPath; Typ: TTextureType): integer; overload;
@@ -625,6 +629,66 @@ begin
     ThemeStatic.Typ, $FFFFFF, ThemeStatic.Reflection, ThemeStatic.Reflectionspacing);
 end;
 
+function TMenu.AddStaticPosition(static: TThemePosition): integer;
+begin
+  Result := AddStatic(
+    static.X,
+    static.Y,
+    static.W,
+    static.H,
+    PATH_NONE
+  );
+end;
+
+function TMenu.AddStaticRectangle(static: TThemeStaticRectangle): integer;
+begin
+  Result := AddStatic(
+    static.X,
+    static.Y,
+    static.W,
+    static.H,
+    PATH_NONE
+  );
+end;
+
+function TMenu.AddStaticAlphaRectangle(static: TThemeStaticAlphaRectangle): integer;
+begin
+  Result := AddStatic(
+    static.X,
+    static.Y,
+    static.W,
+    static.H,
+    static.Z,
+    // Color R G B
+    0, 0, 0,
+    // TexX/Y
+    0, 0, 0, 0,
+    static.Alpha,
+    PATH_NONE,
+    TEXTURE_TYPE_PLAIN,
+    // Color
+    1,
+    // Reflection, reflection spacing
+    false, 0
+  );
+end;
+
+function TMenu.AddStaticColorRectangle(static: TThemeStaticColorRectangle): integer;
+begin
+  Result := AddStatic(
+    static.X,
+    static.Y,
+    static.W,
+    static.H,
+    static.Z,
+    static.ColR,
+    static.ColG,
+    static.ColB,
+    PATH_NONE,
+    TEXTURE_TYPE_PLAIN
+  );
+end;
+
 function TMenu.AddStatic(X, Y, W, H: real; const TexName: IPath): integer;
 begin
   Result := AddStatic(X, Y, W, H, TexName, TEXTURE_TYPE_PLAIN);
@@ -1011,6 +1075,10 @@ function TMenu.DrawFG: boolean;
 var
   J: integer;
 begin
+  //  Draw all ButtonCollections
+  for J := 0 to High(ButtonCollection) do
+    ButtonCollection[J].Draw;
+
   // We don't forget about newly implemented static for nice skin ...
   for J := 0 to High(Statics) do
     Statics[J].Draw;
@@ -1018,10 +1086,6 @@ begin
   // ... and slightly implemented menutext unit
   for J := 0 to High(Text) do
     Text[J].Draw;
-
-  //  Draw all ButtonCollections
-  for J := 0 to High(ButtonCollection) do
-    ButtonCollection[J].Draw;
 
   // Second, we draw all of our buttons
   for J := 0 to High(Button) do

@@ -144,13 +144,14 @@ type
       MaxFramerateGet: byte;
       Screens:        integer;
       Split:          integer;
+      PositionX:      integer;
+      PositionY:      integer;
       Resolution:     integer;             // Resolution for windowed mode
       ResolutionFullscreen:     integer;   // Resolution for real fullscreen (changing Video mode)
       Depth:          integer;
       VisualizerOption: integer;
       FullScreen:     integer;
       TextureSize:    integer;
-      SingWindow:     integer;
       Oscilloscope:   integer;
       // not used
       //Spectrum:       integer;
@@ -352,8 +353,6 @@ const
   ITextureSize:      array[0..3] of UTF8String  = ('64', '128', '256', '512');
   ITextureSizeVals:  array[0..3] of integer     = ( 64,   128,   256,   512);
 
-  ISingWindow:       array[0..1] of UTF8String  = ('Small', 'Big');
-
   // SingBar Mod
   IOscilloscope:     array[0..1] of UTF8String  = ('Off', 'On');
 
@@ -367,8 +366,8 @@ const
   IBeatClick:        array[0..1] of UTF8String  = ('Off', 'On');
   ISavePlayback:     array[0..1] of UTF8String  = ('Off', 'On');
 
-  IThreshold:        array[0..3] of UTF8String  = ('5%', '10%', '15%', '20%');
-  IThresholdVals:    array[0..3] of single  = (0.05, 0.10,  0.15,  0.20);
+  IThreshold:        array[0..7] of UTF8String  = ('5%', '10%', '15%', '20%', '25%', '30%', '40%', '60%');
+  IThresholdVals:    array[0..7] of single      = (0.05, 0.10, 0.15,  0.20,  0.25,  0.30,  0.40,  0.60);
 
   IVoicePassthrough: array[0..1] of UTF8String  = ('Off', 'On');
   
@@ -389,8 +388,8 @@ const
   IAudioInputBufferSizeVals:  array[0..9] of integer     = ( 0,      256,   512 ,  1024 ,  2048 ,  4096 ,  8192 ,  16384 ,  32768 ,  65536 );
 
   // Song Preview
-  IPreviewVolume:             array[0..10] of UTF8String = ('Off', '10%', '20%', '30%', '40%', '50%', '60%', '70%', '80%', '90%', '100%');
-  IPreviewVolumeVals:         array[0..10] of single     = ( 0,   0.10,  0.20,  0.30,  0.40,  0.50,  0.60,  0.70,  0.80,  0.90,   1.00  );
+  IPreviewVolume:             array[0..12] of UTF8String = ('Off', '3%', '5%', '10%', '20%', '30%', '40%', '50%', '60%', '70%', '80%', '90%', '100%');
+  IPreviewVolumeVals:         array[0..12] of single     = ( 0,  0.03,  0.05,  0.10,  0.20,  0.30,  0.40,  0.50,  0.60,  0.70,  0.80,  0.90,   1.00  );
 
   IPreviewFading:             array[0..5] of UTF8String  = ('Off', '1 Sec', '2 Secs', '3 Secs', '4 Secs', '5 Secs');
   IPreviewFadingVals:         array[0..5] of integer     = ( 0,     1,       2,        3,        4,        5      );
@@ -482,7 +481,6 @@ var
   IVisualizerTranslated:       array[0..3] of UTF8String  = ('Off', 'WhenNoVideo', 'WhenNoVideoAndImage','On');
 
   IBackgroundMusicTranslated:  array[0..1] of UTF8String  = ('Off', 'On');
-  ISingWindowTranslated:       array[0..1] of UTF8String  = ('Small', 'Big');
 
   // SingBar Mod
   IOscilloscopeTranslated:     array[0..1] of UTF8String  = ('Off', 'On');
@@ -504,7 +502,7 @@ var
   ISyncToTranslated:           array[0..2] of UTF8String  = ('Music', 'Lyrics', 'Off');
 
   // Song Preview
-  IPreviewVolumeTranslated:    array[0..10] of UTF8String = ('Off', '10%', '20%', '30%', '40%', '50%', '60%', '70%', '80%', '90%', '100%');
+  IPreviewVolumeTranslated:    array[0..12] of UTF8String = ('Off', '3%', '5%', '10%', '20%', '30%', '40%', '50%', '60%', '70%', '80%', '90%', '100%');
 
   IAudioOutputBufferSizeTranslated: array[0..9] of UTF8String  = ('Auto', '256', '512', '1024', '2048', '4096', '8192', '16384', '32768', '65536');
 
@@ -654,9 +652,6 @@ begin
   IBackgroundMusicTranslated[0]       := ULanguage.Language.Translate('OPTION_VALUE_OFF');
   IBackgroundMusicTranslated[1]       := ULanguage.Language.Translate('OPTION_VALUE_ON');
 
-  ISingWindowTranslated[0]            := ULanguage.Language.Translate('OPTION_VALUE_SMALL');
-  ISingWindowTranslated[1]            := ULanguage.Language.Translate('OPTION_VALUE_BIG');
-
   IOscilloscopeTranslated[0]          := ULanguage.Language.Translate('OPTION_VALUE_OFF');
   IOscilloscopeTranslated[1]          := ULanguage.Language.Translate('OPTION_VALUE_ON');
 
@@ -718,7 +713,7 @@ begin
   end;
 
   ILineTranslated[0] := ULanguage.Language.Translate('OPTION_VALUE_TO_SING');
-  ILineTranslated[1] := ULanguage.Language.Translate('OPTION_VALUE_ACTUAL');
+  ILineTranslated[1] := ULanguage.Language.Translate('OPTION_VALUE_CURRENT');
   ILineTranslated[2] := ULanguage.Language.Translate('OPTION_VALUE_NEXT');
 
   IPropertyTranslated[0] := ULanguage.Language.Translate('OPTION_VALUE_FILL');
@@ -880,16 +875,18 @@ begin
 
   // Song Preview
   IPreviewVolumeTranslated[0]         := ULanguage.Language.Translate('OPTION_VALUE_OFF');
-  IPreviewVolumeTranslated[1]         := '10%';
-  IPreviewVolumeTranslated[2]         := '20%';
-  IPreviewVolumeTranslated[3]         := '30%';
-  IPreviewVolumeTranslated[4]         := '40%';
-  IPreviewVolumeTranslated[5]         := '50%';
-  IPreviewVolumeTranslated[6]         := '60%';
-  IPreviewVolumeTranslated[7]         := '70%';
-  IPreviewVolumeTranslated[8]         := '80%';
-  IPreviewVolumeTranslated[9]         := '90%';
-  IPreviewVolumeTranslated[10]        := '100%';
+  IPreviewVolumeTranslated[1]         := '3%';
+  IPreviewVolumeTranslated[2]         := '5%';
+  IPreviewVolumeTranslated[3]         := '10%';
+  IPreviewVolumeTranslated[4]         := '20%';
+  IPreviewVolumeTranslated[5]         := '30%';
+  IPreviewVolumeTranslated[6]         := '40%';
+  IPreviewVolumeTranslated[7]         := '50%';
+  IPreviewVolumeTranslated[8]         := '60%';
+  IPreviewVolumeTranslated[9]         := '70%';
+  IPreviewVolumeTranslated[10]        := '80%';
+  IPreviewVolumeTranslated[11]        := '90%';
+  IPreviewVolumeTranslated[12]        := '100%';
 
 
   IPreviewFadingTranslated[0]         :=        ULanguage.Language.Translate('OPTION_VALUE_OFF');
@@ -1241,6 +1238,12 @@ begin
   // FullScreen
   FullScreen := ReadArrayIndex(IFullScreen, IniFile, 'Graphics', 'FullScreen', IGNORE_INDEX, 'Borderless');
 
+  // PositionX
+  PositionX := StrToInt(IniFile.ReadString('Graphics', 'PositionX', '0'));
+
+  // PositionY
+  PositionY := StrToInt(IniFile.ReadString('Graphics', 'PositionY', '0'));
+
   // standard fallback resolutions
   SetLength(IResolution, 27);
   IResolution[0] := '640x480'; // VGA
@@ -1478,9 +1481,6 @@ begin
 
   // TextureSize (aka CachedCoverSize)
   TextureSize := ReadArrayIndex(ITextureSize, IniFile, 'Graphics', 'TextureSize', IGNORE_INDEX, '256');
-
-  // SingWindow
-  SingWindow := ReadArrayIndex(ISingWindow, IniFile, 'Graphics', 'SingWindow', IGNORE_INDEX, 'Big');
 
   // Oscilloscope
   Oscilloscope := ReadArrayIndex(IOscilloscope, IniFile, 'Graphics', 'Oscilloscope', 0);
@@ -1785,14 +1785,15 @@ begin
     IniFile.WriteString('Graphics', 'Resolution', GetResolution);
     IniFile.WriteString('Graphics', 'ResolutionFullscreen', GetResolutionFullscreen);
 
+    // Position
+    IniFile.WriteString('Graphics', 'PositionX', IntToStr(PositionX));
+    IniFile.WriteString('Graphics', 'PositionY', IntToStr(PositionY));
+
     // Depth
     IniFile.WriteString('Graphics', 'Depth', IDepth[Depth]);
 
     // TextureSize
     IniFile.WriteString('Graphics', 'TextureSize', ITextureSize[TextureSize]);
-
-    // Sing Window
-    IniFile.WriteString('Graphics', 'SingWindow', ISingWindow[SingWindow]);
 
     // Oscilloscope
     IniFile.WriteString('Graphics', 'Oscilloscope', IOscilloscope[Oscilloscope]);

@@ -52,10 +52,6 @@ uses
   UThemes,
   UTime,
   UUnicodeStringHelper,
-  {$IFDEF MSWINDOWS}
-  LazUTF8Classes,
-  LazUTF8,
-  {$ENDIF}
   sdl2,
   SysUtils;
 
@@ -106,8 +102,10 @@ type
       DuetIcon:     cardinal;
       DuetChange:   boolean;
 
-      //Rap Icon
+      //Rap Icons
       RapIcon:     cardinal;
+      RapToFreestyleIcon: cardinal;
+      RapToFreestyle: boolean;
 
       TextCat:   integer;
       StaticCat: integer;
@@ -180,6 +178,7 @@ type
       ListCalcMedleyIcon: array of integer;
       ListDuetIcon:       array of integer;
       ListRapIcon:        array of integer;
+      ListRapToFreestyleIcon: array of integer;
 
       PlayMidi: boolean;
       MidiFadeIn: boolean;
@@ -354,19 +353,14 @@ end;
 //Show Wrong Song when Tabs on Fix
 procedure TScreenSong.FixSelected;
 var
-  I, I2: integer;
+  I2: integer;
 begin
   if (CatSongs.VisibleSongs > 0) then
   begin
-    I2:= 0;
-    for I := Low(CatSongs.Song) to High(Catsongs.Song) do
-    begin
-      if CatSongs.Song[I].Visible then
-        inc(I2);
-
-      if I = Interaction - 1 then
-        break;
-    end;
+    if (Interaction > Low(CatSongs.Song)) and (Interaction <= High(CatSongs.Song)) then
+      I2 := CatSongs.VisibleIndex(Interaction)
+    else
+      I2 := CatSongs.VisibleSongs;
 
     SongCurrent := I2;
     SongTarget  := I2;
@@ -375,19 +369,14 @@ end;
 
 procedure TScreenSong.FixSelected2;
 var
-  I, I2: integer;
+  I2: integer;
 begin
   if (CatSongs.VisibleSongs > 0) then
   begin
-    I2:= 0;
-    for I := Low(CatSongs.Song) to High(Catsongs.Song) do
-    begin
-      if CatSongs.Song[I].Visible then
-        inc(I2);
-
-      if I = Interaction - 1 then
-        break;
-    end;
+    if (Interaction > Low(CatSongs.Song)) and (Interaction <= High(CatSongs.Song)) then
+      I2 := CatSongs.VisibleIndex(Interaction)
+    else
+      I2 := CatSongs.VisibleSongs;
 
     SongTarget  := I2;
   end;
@@ -651,6 +640,7 @@ var
   I2:     integer;
   SDL_ModState:  word;
   UpperLetter: UCS4Char;
+  TempLetter: UCS4Char;
   TempStr: UTF8String;
   VerifySong, WebList: string;
   Fix: boolean;
@@ -721,8 +711,13 @@ begin
             if (CatSongs.Song[(I + Interaction) mod I2].Visible) then
             begin
               TempStr := CatSongs.Song[(I + Interaction) mod I2].Artist;
-              if (Length(TempStr) > 0) and
-                 (UCS4UpperCase(UTF8ToUCS4String(TempStr)[0]) = UpperLetter) then
+              if Length(TempStr) > 0 then TempLetter := UCS4UpperCase(UTF8ToUCS4String(TempStr)[0])
+              else                        TempLetter := 0;
+              //in case of tabs, the artist string may be enclosed in brackets so we check the first charactere is a bracket then go to next
+              // 91 -> '['
+              if (Length(TempStr) > 1) and (TempLetter = 91) then
+                 TempLetter := UCS4UpperCase(UTF8ToUCS4String(TempStr)[1]);
+              if (TempLetter = UpperLetter) then
               begin
                 SkipTo(CatSongs.VisibleIndex((I + Interaction) mod I2), (I + Interaction) mod I2, VS);
 
@@ -792,24 +787,14 @@ begin
     // **********************
 
     // check normal keys
-    case UCS4UpperCase(CharCode) of
-      Ord('Q'):
+    case PressedKey of
+      SDLK_Q:
         begin
           Result := false;
           Exit;
         end;
 
-      Ord('K'):
-        begin
-          UAudioPlaybackBase.ToggleVoiceRemoval();
-          StopVideoPreview();
-          StopMusicPreview();
-          StartMusicPreview();
-          StartVideoPreview();
-          Exit;
-        end;
-
-      Ord('F'):
+      SDLK_F:
         begin
           if (Mode = smNormal) and (SDL_ModState = KMOD_LSHIFT) and MakeMedley then
           begin
@@ -829,7 +814,7 @@ begin
           end;
         end;
 
-      Ord('M'): //Show SongMenu
+      SDLK_M: //Show SongMenu
         begin
           if (Songs.SongList.Count > 0) then
           begin
@@ -886,7 +871,7 @@ begin
           Exit;
         end;
 
-      Ord('P'): //Show Playlist Menu
+      SDLK_P: //Show Playlist Menu
         begin
           if (Songs.SongList.Count > 0) and (FreeListMode) then
           begin
@@ -896,7 +881,7 @@ begin
           Exit;
         end;
 
-      Ord('J'): //Show Jumpto Menu
+      SDLK_J: //Show Jumpto Menu
         begin
           if (Songs.SongList.Count > 0) and (FreeListMode) then
           begin
@@ -905,13 +890,13 @@ begin
           Exit;
         end;
 
-      Ord('E'):
+      SDLK_E:
         begin
           OpenEditor;
           Exit;
         end;
 
-      Ord('S'):
+      SDLK_S:
         begin
           if not (SDL_ModState = KMOD_LSHIFT) and (CatSongs.Song[Interaction].Medley.Source>=msTag)
             and not MakeMedley and (Mode = smNormal) then
@@ -922,7 +907,7 @@ begin
             StartMedley(0, msCalculated);
         end;
 
-      Ord('D'):
+      SDLK_D:
         begin
           if not (SDL_ModState = KMOD_LSHIFT) and (Mode = smNormal) and
             (Length(getVisibleMedleyArr(msTag)) > 0) and not MakeMedley then
@@ -932,7 +917,7 @@ begin
             StartMedley(5, msCalculated);
         end;
 
-      Ord('R'):
+      SDLK_R:
         begin
           Randomize;
           if (Songs.SongList.Count > 0) and
@@ -1011,7 +996,11 @@ begin
           Exit;
         end;
 
-      Ord('W'):
+      SDLK_T:
+        if CatSongs.Song[Interaction].hasRap then
+          RapToFreestyle := not RapToFreestyle;
+
+      SDLK_W:
         begin
 
           if not CatSongs.Song[Interaction].Main then
@@ -1598,7 +1587,7 @@ constructor TScreenSong.Create;
 var
   I, Num, Padding: integer;
   TextArtistY, TextTitleY, TextYearY, StaticMedCY,
-  StaticMedMY, StaticVideoY, StaticDuetY, StaticRapY: integer;
+  StaticMedMY, StaticVideoY, StaticDuetY, StaticRapY, StaticRapToFreestyleY: integer;
   StaticY: real;
 begin
   inherited Create;
@@ -1624,8 +1613,9 @@ begin
   //Duet Icon
   DuetIcon := AddStatic(Theme.Song.DuetIcon);
 
-  //Rap Icon
+  //Rap Icons
   RapIcon := AddStatic(Theme.Song.RapIcon);
+  RapToFreestyleIcon := AddStatic(Theme.Song.RapToFreestyleIcon);
 
   //Show Scores
   TextScore       := AddText(Theme.Song.TextScore);
@@ -1770,6 +1760,7 @@ begin
   SetLength(ListCalcMedleyIcon, Num);
   SetLength(ListDuetIcon, Num);
   SetLength(ListRapIcon, Num);
+  SetLength(ListRapToFreestyleIcon, Num);
 
   TextArtistY := Theme.Song.TextArtist.Y;
   TextTitleY := Theme.Song.TextTitle.Y;
@@ -1780,6 +1771,7 @@ begin
   StaticMedCY := Theme.Song.CalculatedMedleyIcon.Y;
   StaticDuetY := Theme.Song.DuetIcon.Y;
   StaticRapY := Theme.Song.RapIcon.Y;
+  StaticRapToFreestyleY := Theme.Song.RapToFreestyleIcon.Y;
 
   for I := 0 to Num - 1 do
   begin
@@ -1809,6 +1801,9 @@ begin
 
     Theme.Song.RapIcon.Y  := StaticRapY + Padding;
     ListRapIcon[I] := AddStatic(Theme.Song.RapIcon);
+
+    Theme.Song.RapToFreestyleIcon.Y  := StaticRapToFreestyleY + Padding;
+    ListRapToFreestyleIcon[I] := AddStatic(Theme.Song.RapToFreestyleIcon);
   end;
 
   MainChessboardMinLine := 0;
@@ -2081,6 +2076,7 @@ end;
 procedure TScreenSong.OnSongDeSelect;
 begin
   DuetChange := false;
+  RapToFreestyle := false;
 
   CoverTime := 10;
   //UnloadCover(Interaction);
@@ -2142,8 +2138,9 @@ begin
       //Set Visibility of Duet Icon
       Statics[DuetIcon].Visible := CatSongs.Song[Interaction].isDuet;
 
-      //Set Visibility of Rap Icon
-      Statics[RapIcon].Visible := CatSongs.Song[Interaction].hasRap;
+      //Set Visibility of Rap Icons
+      Statics[RapIcon].Visible := CatSongs.Song[Interaction].hasRap and not RapToFreestyle;
+      Statics[RapToFreestyleIcon].Visible := CatSongs.Song[Interaction].hasRap and RapToFreestyle;
 
       // Set texts
       Text[TextArtist].Size := Theme.Song.TextArtist.Size; // reset in case it was previously decreased by a too long artist
@@ -2930,6 +2927,7 @@ begin
     Statics[ListCalcMedleyIcon[I]].Visible := false;
     Statics[ListDuetIcon[I]].Visible := false;
     Statics[ListRapIcon[I]].Visible := false;
+    Statics[ListRapToFreestyleIcon[I]].Visible := false;
 
     //reset
     StaticsList[I].Texture.TexNum := StaticsList[I].TextureDeSelect.TexNum;
@@ -2983,9 +2981,12 @@ begin
     Statics[ListDuetIcon[I]].Texture.Alpha := Alpha;
     Statics[ListDuetIcon[I]].Visible := CatSongs.Song[SongID[I]].isDuet;
 
-    //Set Visibility of Rap Icon
+    //Set Visibility of Rap Icons
     Statics[ListRapIcon[I]].Texture.Alpha := Alpha;
-    Statics[ListRapIcon[I]].Visible := CatSongs.Song[SongID[I]].hasRap;
+    Statics[ListRapIcon[I]].Visible := CatSongs.Song[SongID[I]].hasRap and not RapToFreestyle;
+
+    Statics[ListRapToFreestyleIcon[I]].Texture.Alpha := Alpha;
+    Statics[ListRapToFreestyleIcon[I]].Visible := CatSongs.Song[SongID[I]].hasRap and RapToFreestyle;
 
     // Set texts
     Text[ListTextArtist[I]].Alpha := Alpha;
@@ -3046,6 +3047,7 @@ begin
       Statics[ListCalcMedleyIcon[I]].Visible := false;
       Statics[ListDuetIcon[I]].Visible := false;
       Statics[ListRapIcon[I]].Visible := false;
+      Statics[ListRapToFreestyleIcon[I]].Visible := false;
     end;
 
     Text[TextArtist].Visible := true;
@@ -3056,6 +3058,7 @@ begin
     Statics[CalcMedleyIcon].Visible := true;
     Statics[DuetIcon].Visible := true;
     Statics[RapIcon].Visible := true;
+    Statics[RapToFreestyleIcon].Visible := true;
   end
   else
   begin
@@ -3071,6 +3074,7 @@ begin
       Statics[ListCalcMedleyIcon[I]].Visible := true;
       Statics[ListDuetIcon[I]].Visible := true;
       Statics[ListRapIcon[I]].Visible := true;
+      Statics[ListRapToFreestyleIcon[I]].Visible := true;
     end;
 
     Text[TextArtist].Visible := false;
@@ -3081,6 +3085,7 @@ begin
     Statics[CalcMedleyIcon].Visible := false;
     Statics[DuetIcon].Visible := false;
     Statics[RapIcon].Visible := false;
+    Statics[RapToFreestyleIcon].Visible := false;
   end;
 
   // for duet names
@@ -3185,6 +3190,7 @@ end;
 procedure TScreenSong.OnShowFinish;
 begin
   DuetChange := false;
+  RapToFreestyle := false;
 
   isScrolling := true;
   CoverTime := 10;
@@ -3405,7 +3411,12 @@ begin
   for I := 0 to High(Button) do
   begin
     if (TSongMenuMode(Ini.SongMenu) in [smChessboard, smMosaic, smList]) or (((I<>Interaction) or not Assigned(fCurrentVideo) or (VideoAlpha<1) or FinishedMusic)) then
+    begin
+        // todo: there's probably a better way to set the selected one
+        //  but it's better than every not-yet-selected button being rendered as selected
+        Button[I].SetSelect(I = Interaction);
         Button[I].Draw;
+    end;
   end;
 
   //  StopVideoPreview;
@@ -3837,21 +3848,17 @@ begin
   end
   else
   begin
+    // it's still off by one in certain cases, will select the first or last overall song
     if TargetInteraction = -1 then
     begin
-      if Target = 0 then
-        TargetInteraction := 0
-      else
+      i := 0;
+      for TargetInteraction := 0 to High(CatSongs.Song) do
       begin
-        i := 0;
-        for TargetInteraction := 0 to High(CatSongs.Song) do
+        if CatSongs.Song[TargetInteraction].Visible then
         begin
-          if CatSongs.Song[i].Visible then
-          begin
-            Inc(i);
-            if Target = i then
-              break;
-          end;
+          Inc(i);
+          if Target = i then
+            break;
         end;
       end;
     end;
@@ -4450,7 +4457,7 @@ end;
 procedure TScreenSong.SongScore;
 begin
 
-  if (CatSongs.Song[Interaction].isDuet) or ((Mode <> smNormal) or (Ini.ShowScores = 0) or (CatSongs.Song[Interaction].Edition = '') or ((Ini.ShowScores = 1) and ((Text[TextMaxScore2].Text = '0') and (Text[TextMaxScoreLocal].Text = '0')))) then
+  if (CatSongs.Song[Interaction].isDuet) or (RapToFreestyle) or ((Mode <> smNormal) or (Ini.ShowScores = 0) or (CatSongs.Song[Interaction].Edition = '') or ((Ini.ShowScores = 1) and ((Text[TextMaxScore2].Text = '0') and (Text[TextMaxScoreLocal].Text = '0')))) then
   begin
     Text[TextScore].Visible           := false;
     Text[TextMaxScore].Visible        := false;

@@ -122,28 +122,19 @@ type
       procedure SetLoop(Enabled: boolean); override;
     public
       constructor Create(Buffer: TStream; Format: TAudioFormatInfo);
-      function ReadData(Buffer: PByteArray; BufferSize: integer): integer; override;
+      function ReadData(Buffer: PByte; BufferSize: integer): integer; override;
       function GetAudioFormatInfo(): TAudioFormatInfo; override;
       procedure Close(); override;
   end;
-
-procedure ToggleVoiceRemoval();
 
 implementation
 
 uses
   ULog;
 
-var doVoiceRemoval: boolean;
-
 constructor TAudioPlaybackBase.Create();
 begin
   inherited;
-end;
-
-procedure ToggleVoiceRemoval();
-begin
-  doVoiceRemoval:=not(doVoiceRemoval);
 end;
 
 { TAudioPlaybackBase }
@@ -167,7 +158,6 @@ begin
     Exit;
   end;
 
-  if doVoiceRemoval then MusicStream.AddSoundEffect(TVoiceRemoval.Create());
   if assigned(IReplayGain) and IReplayGain.CanEnable then MusicStream.AddSoundFX(IReplayGain.Create());
 
   Result := true;
@@ -442,7 +432,7 @@ begin
   fLoop := Enabled;
 end;
 
-function TAudioBufferSourceStream.ReadData(Buffer: PByteArray; BufferSize: integer): integer;
+function TAudioBufferSourceStream.ReadData(Buffer: PByte; BufferSize: integer): integer;
 var
   BufSizeLeft: integer;
   NumRead: integer;

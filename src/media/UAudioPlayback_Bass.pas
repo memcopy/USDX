@@ -85,9 +85,6 @@ type
       procedure FadeIn(Time: real; TargetVolume: single); override;
       procedure Fade(Time: real; TargetVolume: single); override;
 
-      procedure AddSoundEffect(Effect: TSoundEffect);    override;
-      procedure RemoveSoundEffect(Effect: TSoundEffect); override;
-
       procedure AddSoundFX(FX: TSoundFX);    override;
       procedure RemoveSoundFX(FX: TSoundFX); override;
 
@@ -96,7 +93,7 @@ type
 
       function GetAudioFormatInfo(): TAudioFormatInfo; override;
 
-      function ReadData(Buffer: PByteArray; BufferSize: integer): integer;
+      function ReadData(Buffer: PByte; BufferSize: integer): integer;
 
       property EOF: boolean READ IsEOF;
   end;
@@ -113,7 +110,7 @@ type
       procedure Close(); override;
 
       procedure WriteData(Buffer: PByteArray; BufferSize: integer); override;
-      function ReadData(Buffer: PByteArray; BufferSize: integer): integer; override;
+      function ReadData(Buffer: PByte; BufferSize: integer): integer; override;
       function IsEOF(): boolean; override;
       function IsError(): boolean; override;
   end;
@@ -188,7 +185,7 @@ begin
     Result := BytesRead;
 end;
 
-function TBassPlaybackStream.ReadData(Buffer: PByteArray; BufferSize: integer): integer;
+function TBassPlaybackStream.ReadData(Buffer: PByte; BufferSize: integer): integer;
 var
   AdjustedSize: integer;
   RequestedSourceSize, SourceSize: integer;
@@ -507,53 +504,10 @@ begin
     SourceStream.Loop := Enabled;
 end;
 
+// This is an empty handler because we need to implement it but never use it
 procedure DSPProcHandler(handle: HDSP; channel: DWORD; buffer: Pointer; length: DWORD; user: Pointer);
 {$IFDEF MSWINDOWS}stdcall;{$ELSE}cdecl;{$ENDIF}
-var
-  Effect: TSoundEffect;
 begin
-  Effect := TSoundEffect(user);
-  if assigned(Effect) then
-    Effect.Callback(buffer, length);
-end;
-
-procedure TBassPlaybackStream.AddSoundEffect(Effect: TSoundEffect);
-var
-  DspHandle: HDSP;
-begin
-  if assigned(Effect.engineData) then
-  begin
-    Log.LogError('TSoundEffect.engineData already set', 'TBassPlaybackStream.AddSoundEffect');
-    Exit;
-  end;
-
-  DspHandle := BASS_ChannelSetDSP(Handle, @DSPProcHandler, Effect, 0);
-  if (DspHandle = 0) then
-  begin
-    Log.LogError(BassCore.ErrorGetString(), 'TBassPlaybackStream.AddSoundEffect');
-    Exit;
-  end;
-
-  GetMem(Effect.EngineData, SizeOf(HDSP));
-  PHDSP(Effect.EngineData)^ := DspHandle;
-end;
-
-procedure TBassPlaybackStream.RemoveSoundEffect(Effect: TSoundEffect);
-begin
-  if not assigned(Effect.EngineData) then
-  begin
-    Log.LogError('TSoundEffect.engineData invalid', 'TBassPlaybackStream.RemoveSoundEffect');
-    Exit;
-  end;
-
-  if not BASS_ChannelRemoveDSP(Handle, PHDSP(Effect.EngineData)^) then
-  begin
-    Log.LogError(BassCore.ErrorGetString(), 'TBassPlaybackStream.RemoveSoundEffect');
-    Exit;
-  end;
-
-  FreeMem(Effect.EngineData);
-  Effect.EngineData := nil;
 end;
 
 procedure TBassPlaybackStream.AddSoundFX(FX: TSoundFX);
@@ -701,7 +655,7 @@ begin
 end;
 
 // Note: we do not need the read-function for the BASS implementation
-function TBassVoiceStream.ReadData(Buffer: PByteArray; BufferSize: integer): integer;
+function TBassVoiceStream.ReadData(Buffer: PByte; BufferSize: integer): integer;
 begin
   Result := -1;
 end;
@@ -783,10 +737,7 @@ begin
   //BASS_SetConfig(BASS_CONFIG_UPDATEPERIOD, 10);
   //BASS_SetConfig(BASS_CONFIG_BUFFER, 100);
 
-  // Using floating-point DSP config converts the passed data to 32bit sample data
-  // some used effects doesn't expect this kind of data, therefore they are bugging
-  // (see Voice removal; UMusic TVoiceRemoval.Callback)
-  //BASS_SetConfig(BASS_CONFIG_FLOATDSP, 1); // enable floating-point DSP
+  Log.LogStatus('Opened audio device', 'TAudioPlayback_Bass.InitializePlayback');
 
   Result := true;
 end;

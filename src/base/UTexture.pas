@@ -144,6 +144,14 @@ uses
   UThemes,
   UImage;
 
+function RoundPOT(value: integer): integer;
+begin
+  if value < 1 then
+    Result := 0
+  else
+    Result := 1 shl Ceil(Log2(value));
+end;
+
 procedure AdjustPixelFormat(var TexSurface: PSDL_Surface; Typ: TTextureType);
 var
   TempSurface: PSDL_Surface;
@@ -251,12 +259,18 @@ var
   newWidth, newHeight: integer;
   oldWidth, oldHeight: integer;
   ActTex: GLuint;
+  ScaleBy: real;
 begin
   // zero texture data
   FillChar(Result, SizeOf(Result), 0);
 
   // load texture data into memory
-  if not (Identifier = nil) then TexSurface := LoadImage(Identifier);
+  if (Identifier = nil) or (Identifier.IsUnset) then
+  begin
+    // there is no point in loading empty textures
+    Exit;
+  end;
+  TexSurface := LoadImage(Identifier);
   if not assigned(TexSurface) then
   begin
     Log.LogError('Could not load texture: "' + Identifier.ToNative +'" with type "'+ TextureTypeToStr(Typ) +'"',
@@ -266,16 +280,21 @@ begin
 
   // convert pixel format as needed
   AdjustPixelFormat(TexSurface, Typ);
+  if not assigned(TexSurface) then
+  begin
+    Log.LogError('Could not convert surface', 'TTextureUnit.LoadTexture');
+    Exit;
+  end;
 
-  // adjust texture size (scale down, if necessary)
-  newWidth   := TexSurface.W;                            //basisbit ToDo make images scale in size and keep ratio?
-  newHeight  := TexSurface.H;
+  // adjust texture size (scale down, if necessary) while keeping aspect ratio
+  ScaleBy := 1;
+  if (Max(TexSurface.W, TexSurface.H) > Limit) then
+  begin
+    ScaleBy := Max(TexSurface.W, TexSurface.H) / Limit;
+  end;
 
-  if (newWidth > Limit) then
-    newWidth := Limit;
-
-  if (newHeight > Limit) then
-    newHeight := Limit;
+  newWidth   := Floor(TexSurface.W / ScaleBy);
+  newHeight  := Floor(TexSurface.H / ScaleBy);
 
   if (TexSurface.W > newWidth) or (TexSurface.H > newHeight) then
     ScaleImage(TexSurface, newWidth, newHeight);
@@ -291,11 +310,19 @@ begin
   {if (SupportsNPOT = false) then
   begin}
   // make texture dimensions be powers of 2
-  newWidth  := Round(Power(2, Ceil(Log2(newWidth))));
-  newHeight := Round(Power(2, Ceil(Log2(newHeight))));
+  newWidth  := RoundPOT(newWidth);
+  newHeight := RoundPOT(newHeight);
   if (newHeight <> oldHeight) or (newWidth <> oldWidth) then
+  begin
     FitImage(TexSurface, newWidth, newHeight);
+    if not assigned(TexSurface) then
+    begin
+      Log.LogError('Could not allocate POT surface', 'TTextureUnit.LoadTexture');
+      Exit;
+    end;
+  end;
   {end;}
+  SDL_LockSurface(TexSurface); // unlocked by SDL_FreeSurface
 
   // at this point we have the image in memory...
   // scaled so that dimensions are powers of 2
@@ -315,6 +342,9 @@ begin
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
   // load data into gl texture
+  if not assigned(TexSurface.pixels) then
+    Log.LogError('Failed to lock surface', 'TTextureUnit.LoadTexture')
+  else
   if (Typ = TEXTURE_TYPE_TRANSPARENT) or
      (Typ = TEXTURE_TYPE_COLORIZED) then
   begin
@@ -415,6 +445,8 @@ function TTextureUnit.CreateTexture(Data: PChar; const Name: IPath; Width, Heigh
 var
   //Error:     integer;
   ActTex:    GLuint;
+  TexWidth:  integer;
+  TexHeight: integer;
 begin
   glGenTextures(1, @ActTex); // ActText = new texture number
   glBindTexture(GL_TEXTURE_2D, ActTex);
@@ -422,7 +454,21 @@ begin
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-  glTexImage2D(GL_TEXTURE_2D, 0, 3, Width, Height, 0, GL_RGB, GL_UNSIGNED_BYTE, Data);
+  if SupportsNPOT or (((Width and (Width - 1)) = 0) and ((Height and (Height - 1)) = 0)) then
+  begin
+    glTexImage2D(GL_TEXTURE_2D, 0, 3, Width, Height, 0, GL_RGB, GL_UNSIGNED_BYTE, Data);
+    Result.TexW := 1;
+    Result.TexH := 1;
+  end
+  else
+  begin
+    TexWidth := RoundPOT(Width);
+    TexHeight := RoundPOT(Height);
+    glTexImage2D(GL_TEXTURE_2D, 0, 3, TexWidth, TexHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, nil);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, Width, Height, GL_RGB, GL_UNSIGNED_BYTE, Data);
+    Result.TexW := Width / TexWidth;
+    Result.TexH := Height / TexHeight;
+  end;
 
 {
   if Mipmapping then
@@ -442,8 +488,6 @@ begin
   Result.ScaleH := 1;
   Result.Rot := 0;
   Result.TexNum := ActTex;
-  Result.TexW := 1;
-  Result.TexH := 1;
 
   Result.Int := 1;
   Result.ColR := 1;

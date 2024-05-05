@@ -4,12 +4,21 @@
 
 ; Product Information:
 
-!define VersionStr "2020.4.0"
-!define FullVersion "2020.4.0+dev" ; semver compatible. see semver.org
+; use this block for a dev version
+!define VersionStr "2024.5.0"
+!define FullVersion "2024.5.0+dev" ; semver compatible. see semver.org
 !define Release "Dev"
 !define DevBuild true
 !define ReleaseMeta "+dev"
 !define ReleaseApp " Dev"
+
+; use this block for a release version
+;!define VersionStr "2024.5.0"
+;!define FullVersion "2024.5.0" ; semver compatible. see semver.org
+;!define Release "Stable"
+;!define DevBuild false
+;!define ReleaseMeta "+stable"
+;!define ReleaseApp " Stable"
 
 !define installername " Installer"
 !define installerexe "UltraStar.Deluxe_v${VersionStr}${ReleaseMeta}_installer"

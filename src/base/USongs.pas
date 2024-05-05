@@ -44,7 +44,6 @@ uses
   Classes,
   {$IFDEF MSWINDOWS}
     Windows,
-    LazUTF8Classes,
   {$ELSE}
     {$IFNDEF DARWIN}
     syscall,
@@ -114,7 +113,6 @@ type
     procedure FindFilesByExtension(const Dir: IPath; const Ext: IPath; Recursive: Boolean; var Files: TPathDynArray);
     procedure BrowseDir(Dir: IPath); // should return number of songs in the future
     procedure BrowseTXTFiles(Dir: IPath);
-    procedure BrowseXMLFiles(Dir: IPath);
     procedure Sort(Order: TSortingType);
     property  Processing: boolean read fProcessing;
   end;
@@ -127,6 +125,8 @@ type
     Order:      integer; // order type (0=title)
     CatNumShow: integer; // Category Number being seen
     CatCount:   integer; // Number of Categorys
+    LastVisChecked: integer; // The real index of the last song that had its VisibilityIndex updated
+    LastVisIndex:   integer; // The VisibilityIndex of the last song that had this value updated
 
     procedure SortSongs();
     procedure Refresh;                                      // refreshes arrays by recreating them from Songs array
@@ -266,7 +266,6 @@ end;
 procedure TSongs.BrowseDir(Dir: IPath);
 begin
   BrowseTXTFiles(Dir);
-  BrowseXMLFiles(Dir);
 end;
 
 procedure TSongs.FindFilesByExtension(const Dir: IPath; const Ext: IPath; Recursive: Boolean; var Files: TPathDynArray);
@@ -315,33 +314,6 @@ begin
     Song := TSong.Create(Files[I]);
 
     if Song.Analyse then
-      SongList.Add(Song)
-    else
-    begin
-      Log.LogError('AnalyseFile failed for "' + Files[I].ToNative + '".');
-      FreeAndNil(Song);
-    end;
-  end;
-
-  SetLength(Files, 0);
-end;
-
-procedure TSongs.BrowseXMLFiles(Dir: IPath);
-var
-  I: integer;
-  Files: TPathDynArray;
-  Song: TSong;
-  Extension: IPath;
-begin
-  SetLength(Files, 0);
-  Extension := Path('.xml');
-  FindFilesByExtension(Dir, Extension, true, Files);
-
-  for I := 0 to High(Files) do
-  begin
-    Song := TSong.Create(Files[I]);
-
-    if Song.AnalyseXML then
       SongList.Add(Song)
     else
     begin
@@ -512,7 +484,7 @@ var
   StringIndex: integer;
   MainArtist:  UTF8String;
 
-  procedure AddCategoryButton(const CategoryName: UTF8String);
+  procedure AddCategoryButton(const CategoryName: UTF8String; const cover: IPath = nil);
   var
     PrevCatBtnIndex: integer;
   begin
@@ -524,7 +496,10 @@ var
     Song[CatIndex].Main     := true;
     Song[CatIndex].OrderTyp := 0;
     Song[CatIndex].OrderNum := Order;
-    Song[CatIndex].Cover    := CatCovers.GetCover(TSortingType(Ini.Sorting), CategoryName);
+    if (cover <> nil) then
+       Song[CatIndex].Cover := cover
+    else
+       Song[CatIndex].Cover := CatCovers.GetCover(TSortingType(Ini.Sorting), CategoryName);
     Song[CatIndex].Visible  := true;
 
     // set number of songs in previous category
@@ -664,8 +639,8 @@ begin
           if (UTF8CompareText(CurCategory, MainArtist) <> 0) then
           begin
             CurCategory := MainArtist;
-            // add folder tab
-            AddCategoryButton(CurCategory);
+            // add folder tab with first song cover
+            AddCategoryButton(CurCategory, CurSong.Path.Append(CurSong.Cover));
           end;
         end;
 
@@ -745,6 +720,8 @@ begin
     CurSong.Visible := true;
 }
   end;
+  LastVisChecked := 0;
+  LastVisIndex := 0;
 
   // set CatNumber of last category
   if (Ini.TabsAtStartup = 1) and (High(Song) >= 1) then
@@ -775,6 +752,8 @@ begin
 //  KMS: This should be the same, but who knows :-)
     CatSongs.Song[S].Visible := ((CatSongs.Song[S].OrderNum = Index) and (not CatSongs.Song[S].Main));
   end;
+  LastVisChecked := 0;
+  LastVisIndex := 0;
 end;
 
 procedure TCatSongs.HideCategory(Index: integer); // hides all songs in category
@@ -786,6 +765,8 @@ begin
     if not CatSongs.Song[S].Main then
       CatSongs.Song[S].Visible := false // hides all at now
   end;
+  LastVisChecked := 0;
+  LastVisIndex := 0;
 end;
 
 procedure TCatSongs.ClickCategoryButton(Index: integer);
@@ -813,6 +794,8 @@ begin
     CatSongs.Song[S].Visible := CatSongs.Song[S].Main;
   CatSongs.Selected := CatNumShow; //Show last shown Category
   CatNumShow := -1;
+  LastVisChecked := 0;
+  LastVisIndex := 0;
 end;
 //Hide Categorys when in Category Hack End
 
@@ -865,15 +848,10 @@ end;
  * Returns the number of visible songs.
  *)
 function TCatSongs.VisibleSongs: integer;
-var
-  SongIndex: integer;
 begin
-  Result := 0;
-  for SongIndex := 0 to High(CatSongs.Song) do
-  begin
-    if (CatSongs.Song[SongIndex].Visible) then
-      Inc(Result);
-  end;
+  Result := VisibleIndex(High(Song));
+  if Song[High(Song)].Visible then
+    Inc(Result);
 end;
 
 (**
@@ -881,15 +859,15 @@ end;
  * If all songs are visible, the result will be equal to the Index parameter. 
  *)
 function TCatSongs.VisibleIndex(Index: integer): integer;
-var
-  SongIndex: integer;
 begin
-  Result := 0;
-  for SongIndex := 0 to Index - 1 do
+  while LastVisChecked < Index do
   begin
-    if (CatSongs.Song[SongIndex].Visible) then
-      Inc(Result);
+    if Song[LastVisChecked].Visible then
+      Inc(LastVisIndex);
+    Inc(LastVisChecked);
+    Song[LastVisChecked].VisibleIndex := LastVisIndex;
   end;
+  Result := Song[Index].VisibleIndex;
 end;
 
 function TCatSongs.SetFilter(FilterStr: UTF8String; Filter: TSongFilter): cardinal;
@@ -899,8 +877,7 @@ var
   WordArray: array of UTF8String;
 begin
 
-  FilterStr := Trim(LowerCase(FilterStr));
-  FilterStr := GetStringWithNoAccents(FilterStr);
+  FilterStr := Trim(LowerCase(TransliterateToASCII(FilterStr)));
 
   if (FilterStr <> '') then
   begin
@@ -929,21 +906,21 @@ begin
       begin
         case Filter of
           fltAll:
-            TmpString := Song[I].ArtistNoAccent + ' ' + Song[i].TitleNoAccent + ' ' + Song[i].LanguageNoAccent + ' ' + Song[i].EditionNoAccent + ' ' + Song[i].GenreNoAccent + ' ' + IntToStr(Song[i].Year) + ' ' + Song[i].CreatorNoAccent; //+ ' ' + Song[i].Folder;
+            TmpString := Song[I].ArtistASCII + ' ' + Song[i].TitleASCII + ' ' + Song[i].LanguageASCII + ' ' + Song[i].EditionASCII + ' ' + Song[i].GenreASCII + ' ' + IntToStr(Song[i].Year) + ' ' + Song[i].CreatorASCII; //+ ' ' + Song[i].Folder;
           fltTitle:
-            TmpString := Song[I].TitleNoAccent;
+            TmpString := Song[I].TitleASCII;
           fltArtist:
-            TmpString := Song[I].ArtistNoAccent;
+            TmpString := Song[I].ArtistASCII;
           fltLanguage:
-            TmpString := Song[I].LanguageNoAccent;
+            TmpString := Song[I].LanguageASCII;
           fltEdition:
-            TmpString := Song[I].EditionNoAccent;
+            TmpString := Song[I].EditionASCII;
           fltGenre:
-            TmpString := Song[I].GenreNoAccent;
+            TmpString := Song[I].GenreASCII;
           fltYear:
             TmpString := IntToStr(Song[I].Year);
           fltCreator:
-            TmpString := Song[I].CreatorNoAccent;
+            TmpString := Song[I].CreatorASCII;
         end;
         Song[i].Visible := true;
         // Look for every searched word
@@ -969,6 +946,8 @@ begin
     end;
     Result := 0;
   end;
+  LastVisChecked := 0;
+  LastVisIndex := 0;
 end;
 
 // -----------------------------------------------------------------------------

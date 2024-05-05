@@ -38,11 +38,6 @@ uses
   SysUtils,
   Classes,
   IniFiles,
-  {$IFDEF MSWINDOWS}
-  LazFileUtils,
-  LazUTF8,
-  LazUTF8Classes,
-  {$ENDIF}
   UConfig,
   UUnicodeStringHelper,
   SDL2;
@@ -392,6 +387,13 @@ uses
   RTLConsts,
   UTextEncoding,
   UFilesystem;
+
+// FileExists() returned true for directories on unix until FPC 3.2.0
+{$IF FPC_VERSION_INT < 3002000}
+{$IFNDEF MSWINDOWS}
+  {$DEFINE HAVE_FILEEXISTSBUG}
+{$ENDIF}
+{$ENDIF}
 
 {*
  * Due to a compiler bug in FPC <= 2.2.4 reference counting does not work
@@ -1015,22 +1017,23 @@ end;
 
 function TPathImpl.Exists(): boolean;
 begin
-  // note the different specifications of FileExists() on Win32 <> Unix
-  {$IFDEF MSWINDOWS}
-  Result := IsFile() or IsDirectory();
-  {$ELSE}
   Result := FileSystem.FileExists(Self);
+  {$IFNDEF HAVE_FILEEXISTSBUG}
+  if not Result then
+    Result := IsDirectory();
   {$ENDIF}
 end;
 
 function TPathImpl.IsFile(): boolean;
 begin
-  // note the different specifications of FileExists() on Win32 <> Unix
-  {$IFDEF MSWINDOWS}
-  Result:= FileSystem.FileExists(Self);
-  {$ELSE}
-  Result := Exists() and not IsDirectory();
+  {$IFDEF HAVE_FILEEXISTSBUG}
+  if IsDirectory() then
+  begin
+    Result := false;
+    Exit;
+  end;
   {$ENDIF}
+  Result:= FileSystem.FileExists(Self);
 end;
 
 function TPathImpl.IsDirectory(): boolean;
@@ -1110,14 +1113,7 @@ end;
 
 constructor TBinaryFileStream.Create(const FileName: IPath; Mode: word);
 begin
-{$IFDEF MSWINDOWS}
-if FileExistsUTF8(FileName.ToUTF8()) or (Mode = fmCreate) then
-  inherited Create(Utf8ToAnsi(FileName.ToUTF8()), Mode)
-else
-  raise EInOutError.Create('File does not exist and Open-action is read, not create: ' + FileName.ToNative() + ' in UPath.TBinaryFileStream.Create');
-{$ELSE}
   inherited Create(FileName.ToNative(), Mode);
-{$ENDIF}
 end;
 
 { TTextStream }

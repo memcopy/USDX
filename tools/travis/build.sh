@@ -1,4 +1,4 @@
-#!/bin/sh -e
+#!/bin/bash -e
 
 if [ -n "$LAZ_OPT" ]; then
     # Lazarus build (with wine)
@@ -19,20 +19,36 @@ elif [ "$TRAVIS_OS_NAME" = "osx" ]; then
         echo "    $link"
     fi
 
-else
+elif [ "$VARIANT" = appimage ] ; then
     # Linux build
 
-    # ./autogen.sh
-    # ./configure
-    # make
-
+    git fetch --unshallow --tags
     cd dists/linux
-    make compress
-    filename="UltraStarDeluxe-$(uname -m).tar.xz"
-    outfile="UltraStarDeluxe-$(git rev-parse --short HEAD)-$(uname -m).tar.xz"
+
+    prepend=""
+    if [ "$TRAVIS_CPU_ARCH" != amd64 ] || [ "$BUILD_32BIT" = yes ] ; then
+        prepend=./dockerenv.sh
+        sed -i '/docker/s/-it\>//' dockerenv.sh
+
+        if [ "$BUILD_32BIT" = yes ] ; then
+            prepend="linux32 $prepend"
+        fi
+    fi
+
+    $prepend make compress
+    set --  UltraStarDeluxe-*.AppImage
+    filename="$1"
+    outfile="UltraStarDeluxe-$(git rev-parse --short HEAD)-${filename#*-}"
     if [ -r "$filename" ]; then
         link="$(curl --upload-file "$filename" "https://transfer.sh/$outfile")"
         echo "$outfile should be available at:"
         echo "    $link"
     fi
+else
+    # Linux build
+
+    ./autogen.sh
+    ./configure --with-opencv-cxx-api --with-libprojectM
+    make
+    make install DESTDIR=out
 fi

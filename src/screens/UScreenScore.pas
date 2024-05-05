@@ -364,8 +364,8 @@ begin
   if (PressedDown) then
   begin
     // check normal keys
-    case UCS4UpperCase(CharCode) of
-      Ord('Q'):
+    case PressedKey of
+      SDLK_Q:
         begin
           Result := false;
           Exit;
@@ -379,7 +379,7 @@ begin
         begin
           if (FinishScreenDraw = true) then
           begin
-            if (CurrentSong.isDuet) or (ScreenSong.Mode = smMedley) then
+            if (CurrentSong.isDuet) or (ScreenSong.RapToFreestyle) or (ScreenSong.Mode = smMedley) then
               FadeTo(@ScreenSong)
             else
               FadeTo(@ScreenTop5);
@@ -403,7 +403,7 @@ begin
            if (FinishScreenDraw = true) then
            begin
 
-             if (CurrentSong.isDuet) or (ScreenSong.Mode = smMedley) then
+             if (CurrentSong.isDuet) or (ScreenSong.RapToFreestyle) or (ScreenSong.Mode = smMedley) then
                FadeTo(@ScreenSong)
              else
                FadeTo(@ScreenTop5);

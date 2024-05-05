@@ -204,7 +204,7 @@ type
       function IsEOF(): boolean;             override;
       function IsError(): boolean;           override;
 
-      function ReadData(Buffer: PByteArray; BufferSize: integer): integer; override;
+      function ReadData(Buffer: PByte; BufferSize: integer): integer; override;
   end;
 
 type
@@ -222,6 +222,14 @@ var
 
 function ParseThreadMain(Data: Pointer): integer; cdecl; forward;
 
+function CodecCanFlush(ctx: PAVCodecContext): boolean;
+begin
+{$IF LIBAVCODEC_VERSION < 60000000}
+	Result := @ctx.codec.flush <> nil;
+{$ELSE}
+	Result := true;
+{$ENDIF}
+end;
 
 { TFFmpegDecodeStream }
 
@@ -287,6 +295,10 @@ begin
   fDecoderPauseRequestCount := 0;
 
   FillChar(fAudioPaket, SizeOf(TAVPacket), 0);
+  {$IF (LIBAVFORMAT_VERSION >= 59000000)}
+  // avoid calling av_packet_unref before fetching first frame
+  fAudioPaket.data := Pointer(STATUS_PACKET);
+  {$ENDIF}
 end;
 
 {*
@@ -324,6 +336,11 @@ var
   PackedSampleFormat: TAVSampleFormat;
   TestFrame: TAVPacket;
   AVResult: integer;
+  CodecID: TAVCodecID;
+  NumChannels: cint;
+  {$IF LIBAVUTIL_VERSION >= 59000000}
+  RequestChannelLayout: TAVChannelLayout;
+  {$ENDIF}
 begin
   Result := false;
 
@@ -395,20 +412,14 @@ begin
   fAudioStream := PPAVStream(PtrUInt(fFormatCtx.streams) + fAudioStreamIndex * Sizeof(pointer))^;
 {$IFEND}
   fAudioStreamPos := 0;
-  fCodecCtx := fAudioStream^.codec;
 
-  // TODO: should we use this or not? Should we allow 5.1 channel audio?
+{$IF LIBAVFORMAT_VERSION < 59000000}
+  CodecID := fAudioStream^.codec^.codec_id;
+{$ELSE}
+  CodecID := fAudioStream^.codecpar^.codec_id;
+{$ENDIF}
 
-  {$IF LIBAVCODEC_VERSION >= 56042000}
-  fCodecCtx^.request_channel_layout := ($20000000 or $40000000); //avcodec.c AV_CH_LAYOUT_STEREO_DOWNMIX;
-  {$ELSEIF LIBAVCODEC_VERSION >= 51042000}
-  if (fCodecCtx^.channels > 0) then
-    fCodecCtx^.request_channels := Min(2, fCodecCtx^.channels)
-  else
-    fCodecCtx^.request_channels := 2;
-  {$IFEND}
-
-  fCodec := avcodec_find_decoder(fCodecCtx^.codec_id);
+  fCodec := avcodec_find_decoder(CodecID);
   if (fCodec = nil) then
   begin
     Log.LogError('Unsupported codec!', 'UAudio_FFmpeg');
@@ -417,8 +428,36 @@ begin
     Exit;
   end;
 
+  fCodecCtx := FFmpegCore.GetCodecContext(fAudioStream, fCodec);
+  if fCodecCtx = nil then
+  begin
+    Close();
+    Exit;
+  end;
+
+  {$IF LIBAVUTIL_VERSION >= 59000000}
+  NumChannels := fCodecCtx^.ch_layout.nb_channels;
+  {$ELSE}
+  NumChannels := fCodecCtx^.channels;
+  {$IFEND}
+
+  // TODO: should we use this or not? Should we allow 5.1 channel audio?
+  {$IF LIBAVUTIL_VERSION >= 59000000}
+  if av_channel_layout_from_string(@RequestChannelLayout, 'downmix') = 0 then
+    av_opt_set_chlayout(fCodecCtx, 'downmix', @RequestChannelLayout, 0); // ignore errors, few codecs support downmix
+  {$ELSEIF LIBAVCODEC_VERSION >= 56042000}
+  fCodecCtx^.request_channel_layout := ($20000000 or $40000000); //avcodec.c AV_CH_LAYOUT_STEREO_DOWNMIX;
+  {$ELSEIF LIBAVCODEC_VERSION >= 51042000}
+  if (NumChannels > 0) then
+    fCodecCtx^.request_channels := Min(2, NumChannels)
+  else
+    fCodecCtx^.request_channels := 2;
+  {$IFEND}
+
   // set debug options
+  {$IF LIBAVCODEC_VERSION < 58000000}
   fCodecCtx^.debug_mv := 0;
+  {$IFEND}
   fCodecCtx^.debug := 0;
 
   {$IF FFMPEG_VERSION_INT >= 1001000}
@@ -465,14 +504,23 @@ begin
     // convert to AV_SAMPLE_FMT_S16 anyway and most architectures have assembly
     // optimized conversion routines from AV_SAMPLE_FMT_FLTP to AV_SAMPLE_FMT_S16.
     PackedSampleFormat := AV_SAMPLE_FMT_S16;
+    {$IF LIBAVUTIL_VERSION >= 59000000}
+    fSwrContext := nil;
+    swr_alloc_set_opts2(@fSwrContext, @fCodecCtx^.ch_layout, PackedSampleFormat, fCodecCtx^.sample_rate,
+                        @fCodecCtx^.ch_layout, fCodecCtx^.sample_fmt, fCodecCtx^.sample_rate, 0, nil);
+    {$ELSE}
     fSwrContext := swr_alloc_set_opts(nil, fCodecCtx^.channel_layout, PackedSampleFormat, fCodecCtx^.sample_rate,
                                       fCodecCtx^.channel_layout, fCodecCtx^.sample_fmt, fCodecCtx^.sample_rate, 0, nil);
+    {$IFEND}
     if (fSwrContext = nil) then
       Log.LogStatus('Error: Failed to create SwrContext', 'TFFmpegDecodeStream.Open')
     else
     begin
-      av_opt_set_int(fSwrContext, 'ich', fCodecCtx^.channels, 0);
-      av_opt_set_int(fSwrContext, 'och', fCodecCtx^.channels, 0);
+      {$IF LIBAVUTIL_VERSION < 59000000}
+      // Not necessary when channel_layout has been set correctly
+      av_opt_set_int(fSwrContext, 'ich', NumChannels, 0);
+      av_opt_set_int(fSwrContext, 'och', NumChannels, 0);
+      {$IFEND}
       if (swr_init(fSwrContext) < 0) then
       begin
         swr_free(@fSwrContext);
@@ -489,15 +537,15 @@ begin
     // try standard format
     SampleFormat := asfS16;
   end;
-  if fCodecCtx^.channels > 255 then
-    Log.LogStatus('Error: CodecCtx^.channels > 255', 'TFFmpegDecodeStream.Open');
+  if NumChannels > 255 then
+    Log.LogStatus('Error: Number of channels > 255', 'TFFmpegDecodeStream.Open');
   fFormatInfo := TAudioFormatInfo.Create(
-    byte(fCodecCtx^.channels),
+    byte(NumChannels),
     fCodecCtx^.sample_rate,
     SampleFormat
   );
   {$IFDEF UseFrameDecoderAPI}
-  fBytesPerSample := av_get_bytes_per_sample(PackedSampleFormat) * fCodecCtx^.channels;
+  fBytesPerSample := av_get_bytes_per_sample(PackedSampleFormat) * NumChannels;
   {$IFEND}
 
   fPacketQueue := TPacketQueue.Create();
@@ -547,11 +595,17 @@ begin
     // avcodec_close() is not thread-safe
     FFmpegCore.LockAVCodec();
     try
+      {$IF LIBAVFORMAT_VERSION < 59000000}
       avcodec_close(fCodecCtx);
+      {$ELSE}
+      avcodec_free_context(@fCodecCtx);
+      {$ENDIF}
     finally
       FFmpegCore.UnlockAVCodec();
     end;
+    {$IF LIBAVFORMAT_VERSION < 59000000}
     fCodecCtx := nil;
+    {$ENDIF}
   end;
 
   // Close the video file
@@ -566,6 +620,14 @@ begin
     {$IFEND}
     fFormatCtx := nil;
   end;
+
+  {$IF (LIBAVFORMAT_VERSION < 59000000)}
+  if (fAudioPaket.data <> nil) then
+    av_free_packet(@fAudioPaket);
+  {$ELSE}
+  if (PAnsiChar(fAudioPaket.data) <> STATUS_PACKET) then
+    av_packet_unref(@fAudioPaket);
+  {$ENDIF}
 
   PerformOnClose();
   
@@ -856,7 +918,11 @@ begin
           begin
             // seeking failed
             fErrorState := true;
+            {$IF LIBAVFORMAT_VERSION <= 58007100}
             Log.LogError('Seek Error in "'+fFormatCtx^.filename+'"', 'UAudioDecoder_FFmpeg');
+            {$ELSE}
+            Log.LogError('Seek Error in "'+fFormatCtx^.url+'"', 'UAudioDecoder_FFmpeg');
+            {$ENDIF}
           end
           else
           begin
@@ -973,7 +1039,11 @@ begin
       if (Packet.stream_index = fAudioStreamIndex) then
         fPacketQueue.Put(@Packet)
       else
+        {$IF (LIBAVFORMAT_VERSION < 59000000)}
         av_free_packet(@Packet);
+        {$ELSE}
+        av_packet_unref(@Packet);
+        {$ENDIF}
 
     finally
       SDL_LockMutex(fStateLock);
@@ -1019,9 +1089,13 @@ begin
 end;
 
 procedure TFFmpegDecodeStream.FlushCodecBuffers();
+{$IF LIBAVFORMAT_VERSION >= 59000000}
+var
+  NewCtx: PAVCodecContext;
+{$ENDIF}
 begin
   // if no flush operation is specified, avcodec_flush_buffers will not do anything.
-  if (@fCodecCtx.codec.flush <> nil) then
+  if CodecCanFlush(fCodecCtx) then
   begin
     // flush buffers used by avcodec_decode_audio, etc.
     avcodec_flush_buffers(fCodecCtx);
@@ -1033,12 +1107,24 @@ begin
     // We will just reopen the codec.
     FFmpegCore.LockAVCodec();
     try
+      {$IF LIBAVFORMAT_VERSION < 59000000}
       avcodec_close(fCodecCtx);
       {$IF LIBAVCODEC_VERSION >= 53005000}
       avcodec_open2(fCodecCtx, fCodec, nil);
       {$ELSE}
       avcodec_open(fCodecCtx, fCodec);
       {$IFEND}
+      {$ELSE}
+      NewCtx := FFmpegCore.GetCodecContext(fAudioStream, fCodec);
+      if NewCtx <> nil then
+      begin
+        avcodec_free_context(@fCodecCtx);
+        fCodecCtx := NewCtx;
+        avcodec_open2(fCodecCtx, fCodec, nil);
+      end
+      else
+        avcodec_flush_buffers(fCodecCtx);
+      {$ENDIF}
     finally
       FFmpegCore.UnlockAVCodec();
     end;
@@ -1151,8 +1237,13 @@ begin
     end;
 
     // free old packet data
+    {$IF (LIBAVFORMAT_VERSION < 59000000)}
     if (fAudioPaket.data <> nil) then
       av_free_packet(@fAudioPaket);
+    {$ELSE}
+    if (PAnsiChar(fAudioPaket.data) <> STATUS_PACKET) then
+      av_packet_unref(@fAudioPaket);
+    {$ENDIF}
 
     // do not block queue on seeking (to avoid deadlocks on the DecoderLock)
     if (IsSeeking()) then
@@ -1168,7 +1259,9 @@ begin
     // handle Status-packet
     if (PAnsiChar(fAudioPaket.data) = STATUS_PACKET) then
     begin
+      {$IF (LIBAVFORMAT_VERSION < 59000000)}
       fAudioPaket.data := nil;
+      {$ENDIF}
       fAudioPaketData := nil;
       fAudioPaketSize := 0;
 
@@ -1230,7 +1323,7 @@ begin
   end;
 end;
 
-function TFFmpegDecodeStream.ReadData(Buffer: PByteArray; BufferSize: integer): integer;
+function TFFmpegDecodeStream.ReadData(Buffer: PByte; BufferSize: integer): integer;
 var
   CopyByteCount:   integer; // number of bytes to copy
   RemainByteCount: integer; // number of bytes left (remain) to read
@@ -1356,7 +1449,9 @@ function TAudioDecoder_FFmpeg.InitializeDecoder: boolean;
 begin
   //Log.LogStatus('InitializeDecoder', 'UAudioDecoder_FFmpeg');
   FFmpegCore := TMediaCore_FFmpeg.GetInstance();
+  {$IF LIBAVFORMAT_VERSION < 58027100}
   av_register_all();
+  {$ENDIF}
 
   // Do not show uninformative error messages by default.
   // FFmpeg prints all error-infos on the console by default what

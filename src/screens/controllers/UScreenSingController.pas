@@ -74,13 +74,14 @@ type
 type
   TScreenSingController = class(TMenu)
   private
-
     StartNote, EndNote:     TPos;
 
     procedure LoadNextSong();
-
     procedure SongError();
+    procedure ResetLinesAndLyrics();
+    procedure ClearLyricEngines();
   public
+    CheckPlayerConfigOnNextSong: boolean;
     eSongLoaded: THookableEvent; //< event is called after lyrics of a song are loaded on OnShow
     Paused:     boolean; //pause Mod
     NumEmptySentences: array [0..1] of integer;
@@ -155,6 +156,8 @@ type
     PlayerDuetNames:array [1..IMaxPlayerCount] of UTF8String;
 
     Tex_Background: TTexture;
+    // controls both background image and video
+    BackgroundAspectCorrection: TAspectCorrection;
     FadeOut: boolean;
 
     procedure ClearSettings;
@@ -231,8 +234,8 @@ begin
     + KMOD_LCTRL + KMOD_RCTRL + KMOD_LALT  + KMOD_RALT);
 
     // check normal keys
-    case UCS4UpperCase(CharCode) of
-      Ord('Q'):
+    case PressedKey of
+      SDLK_Q:
       begin
         // when not ask before exit then finish now
         if (Ini.AskbeforeDel <> 1) then
@@ -245,8 +248,8 @@ begin
         Exit;
       end;
 
-      //Restart and pause song
-      Ord('R'):
+      // restart song
+      SDLK_R:
       begin
         if ScreenSong.Mode = smMedley then Exit;
         for i1 := 0 to High(Player) do
@@ -280,13 +283,18 @@ begin
         begin
           Scores.AddPlayer(Tex_ScoreBG[i1], Color);
         end;
+
         LyricsState.SetCurrentTime(CurrentSong.Start);
+        LyricsState.UpdateBeats();
+        ClearLyricEngines;
+        ResetLinesAndLyrics;
+
         Scores.Init;
         Exit;
       end;
 
       // show visualization
-      Ord('V'):
+      SDLK_V:
       begin
         if fShowWebcam then
         begin
@@ -302,7 +310,10 @@ begin
           fShowVisualization := false;
           fCurrentVideo := fVideoClip;
           if (Assigned(fCurrentVideo)) then
-               fCurrentVideo.Position := CurrentSong.VideoGAP + CurrentSong.Start + AudioPlayback.Position;
+          begin
+            fCurrentVideo.SetAspectCorrection(BackgroundAspectCorrection);
+            fCurrentVideo.Position := CurrentSong.VideoGAP + CurrentSong.Start + AudioPlayback.Position;
+          end;
           Log.LogStatus('finished switching to video', 'UScreenSing.ParseInput');
         end
         else
@@ -328,7 +339,7 @@ begin
       end;
 
       // show Webcam
-      Ord('W'):
+      SDLK_W:
       begin
         if (fShowWebCam = false) then
         begin
@@ -358,14 +369,14 @@ begin
       end;
 
       // pause
-      Ord('P'):
+      SDLK_P:
       begin
         Pause;
         Exit;
       end;
 
       // toggle time display: running time/remaining time/total time / SHIFT: show/hide time bar
-      Ord('T'):
+      SDLK_T:
       begin
         if (SDL_ModState = KMOD_LSHIFT) then
         begin
@@ -389,7 +400,7 @@ begin
       end;
 
       // skip intro / SHIFT: show/hide score display
-      Ord('S'):
+      SDLK_S:
       begin
         if (SDL_ModState = KMOD_LSHIFT) then
         begin
@@ -401,18 +412,20 @@ begin
         end
         else
         begin
-          if (AudioPlayback.Position < CurrentSong.gap / 1000 - 6) then
+          if (not CurrentSong.isDuet and (GetTimeFromBeat(Lyrics.GetUpperLine().StartNote) - AudioPlayback.Position > 6)) then
           begin
-            AudioPlayback.SetPosition(CurrentSong.gap / 1000.0 - 5.0);
-              if (Assigned(fCurrentVideo)) then
-                 fCurrentVideo.Position := CurrentSong.VideoGAP + CurrentSong.Start + (CurrentSong.gap / 1000.0 - 5.0);
+            AudioPlayback.SetPosition(GetTimeFromBeat(Lyrics.GetUpperLine().StartNote) - 5);
+          end
+          else if (CurrentSong.isDuet and (GetTimeFromBeat(min(LyricsDuetP1.GetUpperLine().StartNote, LyricsDuetP2.GetUpperLine().StartNote)) - AudioPlayback.Position > 6)) then
+          begin
+            AudioPlayback.SetPosition(GetTimeFromBeat(min(LyricsDuetP1.GetUpperLine().StartNote, LyricsDuetP2.GetUpperLine().StartNote)) - 5);
           end;
           Exit;
         end;
       end;
 
       // SHIFT: show/hide oscilloscope
-      Ord('O'):
+      SDLK_O:
       begin
         if (SDL_ModState = KMOD_LSHIFT) then
         begin
@@ -425,7 +438,7 @@ begin
       end;
 
       // SHIFT: show/hide notes
-      Ord('N'):
+      SDLK_N:
       begin
         if (SDL_ModState = KMOD_LSHIFT) then
         begin
@@ -438,7 +451,7 @@ begin
       end;
 
       // SHIFT: show/hide notes
-      Ord('L'):
+      SDLK_L:
       begin
         if (SDL_ModState = KMOD_LSHIFT) then
         begin
@@ -451,7 +464,7 @@ begin
       end;
 
       // SHIFT: show/hide avatars and player names
-      Ord('A'):
+      SDLK_A:
       begin
         if (SDL_ModState = KMOD_LSHIFT) then
         begin
@@ -460,11 +473,19 @@ begin
 
           ScreenSing.Settings.AvatarsVisible := not ScreenSing.Settings.AvatarsVisible;
           Exit;
+        end
+        else
+        begin
+          BackgroundAspectCorrection := TAspectCorrection((Ord(BackgroundAspectCorrection)+1) mod (Ord(High(TAspectCorrection))+1));
+          if (Assigned(fCurrentVideo)) then
+          begin
+            fCurrentVideo.SetAspectCorrection(BackgroundAspectCorrection);
+          end;
         end;
       end;
 
       // SHIFT: show/hide microphone input/sung notes
-      Ord('I'):
+      SDLK_I:
       begin
         if (SDL_ModState = KMOD_LSHIFT) then
         begin
@@ -477,7 +498,7 @@ begin
       end;
 
       // SHIFT: show/hide (toggle) all display elements
-      Ord('H'):
+      SDLK_H:
       begin
         if (SDL_ModState = KMOD_LSHIFT) then
         begin
@@ -520,7 +541,7 @@ begin
       SDLK_RIGHT:
       begin
         if (SDL_ModState = KMOD_LCTRL) then // seek 5 seconds forward
-        AudioPlayback.SetPosition(AudioPlayback.Position + 5.0);
+          AudioPlayback.SetPosition(AudioPlayback.Position + 5.0);
         if (Assigned(fCurrentVideo)) then
           fCurrentVideo.Position := AudioPlayback.Position + 5.0;
       end;
@@ -528,9 +549,9 @@ begin
       SDLK_LEFT:
       begin
         if (SDL_ModState = KMOD_LCTRL) then // seek 5 seconds backward and reset scores to avoid cheating
-	begin
-	if (AudioPlayback.Position < 20.0) then
-	  exit;
+        begin
+          if (AudioPlayback.Position < 20.0) then
+          exit;
         for i1 := 0 to High(Player) do
         with Player[i1] do
         begin
@@ -555,12 +576,12 @@ begin
         begin
           Scores.AddPlayer(Tex_ScoreBG[i1], Color);
         end;
-	Scores.Init;
+        Scores.Init;
 
         AudioPlayback.SetPosition(AudioPlayback.Position - 5.0);
-	LyricsState.SetCurrentTime(AudioPlayback.Position - 5.0);
-	Lyrics.Clear(CurrentSong.BPM[0].BPM, CurrentSong.Resolution);
-	LyricsState.UpdateBeats();
+        LyricsState.SetCurrentTime(AudioPlayback.Position - 5.0);
+        ClearLyricEngines;
+        LyricsState.UpdateBeats();
         if (Assigned(fCurrentVideo)) then
           fCurrentVideo.Position := AudioPlayback.Position - 5.0;
         end;
@@ -633,6 +654,9 @@ begin
   inherited Create;
   ScreenSing := self;
   screenSingViewRef := TScreenSingView.Create();
+  CheckPlayerConfigOnNextSong := true;
+  // for now: default to letterbox but preserve aspect between songs
+  BackgroundAspectCorrection := acoLetterBox;
 
   ClearSettings;
 end;
@@ -688,11 +712,13 @@ begin
   Text[screenSingViewRef.SongNameText].Visible := false;
 
   BadPlayer := AudioInputProcessor.CheckPlayersConfig(PlayersPlay);
-  if (BadPlayer <> 0) then
+  if (BadPlayer <> 0) and CheckPlayerConfigOnNextSong then
   begin
     ScreenPopupError.ShowPopup(
         Format(Language.Translate('ERROR_PLAYER_NO_DEVICE_ASSIGNMENT'),
         [BadPlayer]));
+    // do not show the warning again, unless something sets this to true again
+    CheckPlayerConfigOnNextSong := false;
   end;
 
   if (CurrentSong.isDuet) then
@@ -719,73 +745,43 @@ begin
     LyricsDuetP2.FontStyle := Ini.LyricsStyle;
 
     // set custom options
-    case Ini.LyricsStyle of
-      0, 1: // regular/bold (non-outline) fonts
-      begin
-        LyricsDuetP1.LineColor_en.R := Skin_FontR;
-        LyricsDuetP1.LineColor_en.G := Skin_FontG;
-        LyricsDuetP1.LineColor_en.B := Skin_FontB;
-        LyricsDuetP1.LineColor_en.A := 1;
+    LyricsDuetP1.LineColor_act.R := ColP1.R;
+    LyricsDuetP1.LineColor_act.G := ColP1.G;
+    LyricsDuetP1.LineColor_act.B := ColP1.B;
+    LyricsDuetP1.LineColor_act.A := 1;
 
-        LyricsDuetP2.LineColor_en.R := Skin_FontR;
-        LyricsDuetP2.LineColor_en.G := Skin_FontG;
-        LyricsDuetP2.LineColor_en.B := Skin_FontB;
-        LyricsDuetP2.LineColor_en.A := 1;
+    LyricsDuetP2.LineColor_act.R := ColP2.R;
+    LyricsDuetP2.LineColor_act.G := ColP2.G;
+    LyricsDuetP2.LineColor_act.B := ColP2.B;
+    LyricsDuetP2.LineColor_act.A := 1;
 
-        LyricsDuetP1.LineColor_dis.R := 0.2;
-        LyricsDuetP1.LineColor_dis.G := 0.2;
-        LyricsDuetP1.LineColor_dis.B := 0.2;
-        LyricsDuetP1.LineColor_dis.A := 1;
+    if (Ini.JukeboxActualLineColor = High(UIni.IActualLineColor)) then
+      Col := GetJukeboxLyricOtherColor(1)
+    else
+      Col := GetLyricGrayColor(Ini.JukeboxActualLineColor);
+    LyricsDuetP1.LineColor_en.R := Col.R;
+    LyricsDuetP1.LineColor_en.G := Col.G;
+    LyricsDuetP1.LineColor_en.B := Col.B;
+    LyricsDuetP1.LineColor_en.A := 1;
 
-        LyricsDuetP2.LineColor_dis.R := 0.2;
-        LyricsDuetP2.LineColor_dis.G := 0.2;
-        LyricsDuetP2.LineColor_dis.B := 0.2;
-        LyricsDuetP2.LineColor_dis.A := 1;
+    LyricsDuetP2.LineColor_en.R := Col.R;
+    LyricsDuetP2.LineColor_en.G := Col.G;
+    LyricsDuetP2.LineColor_en.B := Col.B;
+    LyricsDuetP2.LineColor_en.A := 1;
 
-        LyricsDuetP1.LineColor_act.R := ColP1.R; //0.02;
-        LyricsDuetP1.LineColor_act.G := ColP1.G; //0.6;
-        LyricsDuetP1.LineColor_act.B := ColP1.B; //0.8;
-        LyricsDuetP1.LineColor_act.A := 1;
+    if (Ini.JukeboxNextLineColor = High(UIni.INextLineColor)) then
+      Col := GetJukeboxLyricOtherColor(2)
+    else
+      Col := GetLyricGrayColor(Ini.JukeboxNextLineColor);
+    LyricsDuetP1.LineColor_dis.R := Col.R;
+    LyricsDuetP1.LineColor_dis.G := Col.G;
+    LyricsDuetP1.LineColor_dis.B := Col.B;
+    LyricsDuetP1.LineColor_dis.A := 1;
 
-        LyricsDuetP2.LineColor_act.R := ColP2.R; //0.02;
-        LyricsDuetP2.LineColor_act.G := ColP2.G; //0.6;
-        LyricsDuetP2.LineColor_act.B := ColP2.B; //0.8;
-        LyricsDuetP2.LineColor_act.A := 1;
-
-      end;
-      2: // outline font
-      begin
-        LyricsDuetP1.LineColor_en.R := 0.7;
-        LyricsDuetP1.LineColor_en.G := 0.7;
-        LyricsDuetP1.LineColor_en.B := 0.7;
-        LyricsDuetP1.LineColor_en.A := 1;
-
-        LyricsDuetP2.LineColor_en.R := 0.7;
-        LyricsDuetP2.LineColor_en.G := 0.7;
-        LyricsDuetP2.LineColor_en.B := 0.7;
-        LyricsDuetP2.LineColor_en.A := 1;
-
-        LyricsDuetP1.LineColor_dis.R := 0.8;
-        LyricsDuetP1.LineColor_dis.G := 0.8;
-        LyricsDuetP1.LineColor_dis.B := 0.8;
-        LyricsDuetP1.LineColor_dis.A := 1;
-
-        LyricsDuetP2.LineColor_dis.R := 0.8;
-        LyricsDuetP2.LineColor_dis.G := 0.8;
-        LyricsDuetP2.LineColor_dis.B := 0.8;
-        LyricsDuetP2.LineColor_dis.A := 1;
-
-        LyricsDuetP1.LineColor_act.R := ColP1.R; //0.5;
-        LyricsDuetP1.LineColor_act.G := ColP1.G; //0.5;
-        LyricsDuetP1.LineColor_act.B := ColP1.B; //1;
-        LyricsDuetP1.LineColor_act.A := 1;
-
-        LyricsDuetP2.LineColor_act.R := ColP2.R; //0.5;
-        LyricsDuetP2.LineColor_act.G := ColP2.G; //0.5;
-        LyricsDuetP2.LineColor_act.B := ColP2.B; //1;
-        LyricsDuetP2.LineColor_act.A := 1;
-      end;
-    end; // case
+    LyricsDuetP2.LineColor_dis.R := Col.R;
+    LyricsDuetP2.LineColor_dis.G := Col.G;
+    LyricsDuetP2.LineColor_dis.B := Col.B;
+    LyricsDuetP2.LineColor_dis.A := 1;
 
   end
   else
@@ -794,69 +790,32 @@ begin
     Lyrics.FontFamily := Ini.LyricsFont;
     Lyrics.FontStyle := Ini.LyricsStyle;
 
-    case Ini.LyricsStyle of
-      0, 1: // regular/bold (non-outline) font
-      begin
-        if (Ini.JukeboxActualLineColor = High(UIni.IActualLineColor)) then
-          Col := GetJukeboxLyricOtherColor(1)
-        else
-          Col := GetLyricGrayColor(Ini.JukeboxActualLineColor);
+    if (Ini.JukeboxSingLineColor = High(UIni.ISingLineColor)) then
+      Col := GetJukeboxLyricOtherColor(0)
+    else
+      Col := GetLyricColor(Ini.JukeboxSingLineColor);
+    Lyrics.LineColor_act.R := Col.R;
+    Lyrics.LineColor_act.G := Col.G;
+    Lyrics.LineColor_act.B := Col.B;
+    Lyrics.LineColor_act.A := 1;
 
-        Lyrics.LineColor_en.R := Col.R;
-        Lyrics.LineColor_en.G := Col.G;
-        Lyrics.LineColor_en.B := Col.B;
-        Lyrics.LineColor_en.A := 1;
+    if (Ini.JukeboxActualLineColor = High(UIni.IActualLineColor)) then
+      Col := GetJukeboxLyricOtherColor(1)
+    else
+      Col := GetLyricGrayColor(Ini.JukeboxActualLineColor);
+    Lyrics.LineColor_en.R := Col.R;
+    Lyrics.LineColor_en.G := Col.G;
+    Lyrics.LineColor_en.B := Col.B;
+    Lyrics.LineColor_en.A := 1;
 
-        if (Ini.JukeboxNextLineColor = High(UIni.INextLineColor)) then
-          Col := GetJukeboxLyricOtherColor(2)
-        else
-          Col := GetLyricGrayColor(Ini.JukeboxNextLineColor);
-
-        Lyrics.LineColor_dis.R := Col.R;
-        Lyrics.LineColor_dis.G := Col.G;
-        Lyrics.LineColor_dis.B := Col.B;
-        Lyrics.LineColor_dis.A := 1;
-
-        if (Ini.JukeboxSingLineColor = High(UIni.ISingLineColor)) then
-          Col := GetJukeboxLyricOtherColor(0)
-        else
-          Col := GetLyricColor(Ini.JukeboxSingLineColor);
-
-        Lyrics.LineColor_act.R := Col.R; //0.02;
-        Lyrics.LineColor_act.G := Col.G; //0.6;
-        Lyrics.LineColor_act.B := Col.B; //0.8;
-        Lyrics.LineColor_act.A := 1;
-      end;
-      2: // outline fonts
-      begin
-        if (Ini.JukeboxSingLineColor = High(UIni.ISingLineColor)) then
-          Col := GetJukeboxLyricOtherColor(0)
-        else
-          Col := GetLyricColor(Ini.JukeboxSingLineColor);
-        Lyrics.LineColor_act.R := Col.R;
-        Lyrics.LineColor_act.G := Col.G;
-        Lyrics.LineColor_act.B := Col.B;
-        Lyrics.LineColor_act.A := 1;
-
-        if (Ini.JukeboxActualLineColor = High(UIni.IActualLineColor)) then
-          Col := GetJukeboxLyricOtherColor(1)
-        else
-          Col := GetLyricGrayColor(Ini.JukeboxActualLineColor);
-        Lyrics.LineColor_en.R := Col.R;
-        Lyrics.LineColor_en.G := Col.G;
-        Lyrics.LineColor_en.B := Col.B;
-        Lyrics.LineColor_en.A := 1;
-
-        if (Ini.JukeboxNextLineColor = High(UIni.INextLineColor)) then
-          Col := GetJukeboxLyricOtherColor(2)
-        else
-          Col := GetLyricGrayColor(Ini.JukeboxNextLineColor);
-        Lyrics.LineColor_dis.R := Col.R;
-        Lyrics.LineColor_dis.G := Col.G;
-        Lyrics.LineColor_dis.B := Col.B;
-        Lyrics.LineColor_dis.A := 1;
-      end;
-    end; // case
+    if (Ini.JukeboxNextLineColor = High(UIni.INextLineColor)) then
+      Col := GetJukeboxLyricOtherColor(2)
+    else
+      Col := GetLyricGrayColor(Ini.JukeboxNextLineColor);
+    Lyrics.LineColor_dis.R := Col.R;
+    Lyrics.LineColor_dis.G := Col.G;
+    Lyrics.LineColor_dis.B := Col.B;
+    Lyrics.LineColor_dis.A := 1;
   end;
 
   // deactivate pause
@@ -1072,11 +1031,7 @@ begin
   success := false;
   // FIXME: bad style, put the try-except into loadsong() and not here
   try
-    // check if file is xml
-    if CurrentSong.FileName.GetExtension.ToUTF8 = '.xml' then
-      success := CurrentSong.AnalyseXML and CurrentSong.LoadXMLSong()
-    else
-      success := CurrentSong.Analyse(false, ScreenSong.DuetChange); // and CurrentSong.LoadSong();
+    success := CurrentSong.Analyse(false, ScreenSong.DuetChange, ScreenSong.RapToFreestyle); // and CurrentSong.LoadSong();
   except
     on E: EInOutError do Log.LogWarn(E.Message, 'TScreenSing.LoadNextSong');
   end;
@@ -1133,9 +1088,10 @@ begin
   if (Ini.VideoEnabled = 1) and CurrentSong.Video.IsSet() and VideoFile.IsFile then
   begin
     fVideoClip := VideoPlayback.Open(VideoFile);
-    fCurrentVideo := fVideoClip;
     if (fVideoClip <> nil) then
     begin
+      fCurrentVideo := fVideoClip;
+      fCurrentVideo.SetAspectCorrection(BackgroundAspectCorrection);
       fShowVisualization := false;
       if ScreenSong.Mode = smMedley then
         fCurrentVideo.Position := CurrentSong.VideoGAP + MedleyStart
@@ -1153,10 +1109,11 @@ begin
     BgFile := CurrentSong.Path.Append(CurrentSong.Background);
     try
       Tex_Background := Texture.LoadTexture(BgFile);
+      fShowBackground := fCurrentVideo = nil;
     except
       Log.LogError('Background could not be loaded: ' + BgFile.ToNative);
       Tex_Background.TexNum := 0;
-    end
+    end;
   end
   else
   begin
@@ -1223,9 +1180,7 @@ begin
   AudioInput.CaptureStart;
 
   // main text
-  Lyrics.Clear(CurrentSong.BPM[0].BPM, CurrentSong.Resolution);
-  LyricsDuetP1.Clear(CurrentSong.BPM[0].BPM, CurrentSong.Resolution);
-  LyricsDuetP2.Clear(CurrentSong.BPM[0].BPM, CurrentSong.Resolution);
+  ClearLyricEngines;
 
   if (CurrentSong.isDuet) and (PlayersPlay <> 1) then
   begin
@@ -1286,6 +1241,26 @@ begin
     onShowFinish;
 end;
 
+// Forces the notes (lines) and lyrics to reset to the start of the song
+procedure TScreenSingController.ResetLinesAndLyrics();
+var
+  i1: integer;
+
+begin
+  for i1 := 0 to PlayersPlay - 1 do
+  begin
+    Tracks[i1].CurrentLine := 0;
+    OnSentenceChange(i1, 0);
+  end;
+end;
+
+procedure TScreenSingController.ClearLyricEngines();
+begin
+    Lyrics.Clear(CurrentSong.BPM[0].BPM, CurrentSong.Resolution);
+    LyricsDuetP1.Clear(CurrentSong.BPM[0].BPM, CurrentSong.Resolution);
+    LyricsDuetP2.Clear(CurrentSong.BPM[0].BPM, CurrentSong.Resolution);
+end;
+
 procedure TScreenSingController.ClearSettings;
 begin
   Settings.Finish := False;
@@ -1313,6 +1288,10 @@ end;
 
 procedure TScreenSingController.OnHide;
 begin
+  // close video files
+  fVideoClip := nil;
+  fCurrentVideo := nil;
+
   // background texture
   if Tex_Background.TexNum > 0 then
   begin
@@ -1542,10 +1521,6 @@ begin
 
   LyricsState.Stop();
   LyricsState.SetSyncSource(nil);
-
-  // close video files
-  fVideoClip := nil;
-  fCurrentVideo := nil;
 
   // kill all stars and effects
   GoldenRec.KillAll;

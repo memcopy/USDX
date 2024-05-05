@@ -61,6 +61,7 @@ uses
   //------------------------------
   //Includes - 3rd Party Libraries
   //------------------------------
+  AnyAscii               in 'lib\anyascii\anyascii.pas',
   SQLiteTable3  in 'lib\SQLite\SQLiteTable3.pas',
   SQLite3       in 'lib\SQLite\SQLite3.pas',
   sdl2                   in 'lib\SDL2\sdl2.pas',
@@ -212,7 +213,6 @@ uses
   URecord           in 'base\URecord.pas',
   UTime             in 'base\UTime.pas',
   USong             in 'base\USong.pas',
-  UXMLSong          in 'base\UXMLSong.pas',
   USongs            in 'base\USongs.pas',
   UIni              in 'base\UIni.pas',
   UImage            in 'base\UImage.pas',

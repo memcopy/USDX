@@ -41,8 +41,6 @@ AC_PRESERVE_HELP_ORDER
 
 # options for make command
 AC_PROG_MAKE_SET
-# find tool for ln -s (e.g. uses cp -p for FAT-filesystems)
-AC_LN_S
 # find a program for recursive dir creation
 AC_PROG_MKDIR_P
 # find the best install tool
@@ -95,6 +93,11 @@ AC_ARG_WITH([libprojectM],
     [AS_HELP_STRING([--with-libprojectM],
       [enable projectM visualization support @<:@default=no@:>@])],
     [with_libprojectM=$withval], [with_libprojectM="no"])
+
+AC_ARG_WITH([local-projectM-presets],
+    [AS_HELP_STRING([--with-local-projectM-presets],
+		    [use the presets from game/visuals/ @<:@default=no@:>@])],
+    [with_local_projectM_presets=$withval], [with_local_projectM_presets="no"])
 
 # add OpenCV option
 AC_ARG_WITH([opencv-cxx-api],
@@ -211,26 +214,20 @@ PKG_HAVE([sqlite3], [sqlite3], yes)
 # Mac OS X and other linux distributions use lua.pc
 # Archlinux aur package for 5.3 use lua5.3.pc in order
 # to make it work alongside the 5.2 version.
-PKG_HAVE([lua], [lua5.3], check)
-lua_LIB_NAME="lua5.3"
-if [[ x$lua_HAVE = xyes ]]; then
-	PKG_VERSION([lua], [lua5.3])
-else
-	PKG_HAVE([lua], [lua5.2], check)
-	lua_LIB_NAME="lua5.2"
-	if [[ x$lua_HAVE = xyes ]]; then
-		PKG_VERSION([lua], [lua5.2])
-	else
-		PKG_HAVE([lua], [lua5.1], check)
-		lua_LIB_NAME="lua5.1"
-		if [[ x$lua_HAVE = xyes ]]; then
-			PKG_VERSION([lua], [lua5.1])
-		else
+
+for i in 5.4 5.3 5.2 5.1 ; do
+    PKG_HAVE([lua], [lua$i], check)
+    if [[ x$lua_HAVE = xyes ]]; then
+        lua_LIB_NAME="lua$i"
+        PKG_VERSION([lua], [lua$i])
+        break
+    fi
+done
+
+if [[ x$lua_HAVE != xyes ]]; then
     PKG_HAVE([lua], [lua >= 5.1], yes)
     lua_LIB_NAME="lua"
-			PKG_VERSION([lua], [lua])
-		fi
-	fi
+    PKG_VERSION([lua], [lua])
 fi
 AC_MSG_CHECKING([size of lua_Integer])
 PKG_VALUE([lua],[CFLAGS],[cflags],[$lua_LIB_NAME],[C compiler flags for Lua])
@@ -301,7 +298,13 @@ AC_SUBST_DEFINE(HAVE_SWRESAMPLE, $libswresample_HAVE)
 # map avutil library version to ffmpeg version
 AC_MSG_CHECKING([version of ffmpeg])
 # the order is ([avutil], [avcodec], [avformat], [swscale], [swresample])
-if   FFMPEG_LIBS_COMPATIBLE([56014100], [58018100], [58012100], [5001100], [3001100]); then
+if   FFMPEG_LIBS_COMPATIBLE([59008100], [61003100], [61001100], [8001100], [5001100]); then
+    FFMPEG_VERSION="7.0"
+elif FFMPEG_LIBS_COMPATIBLE([58002100], [60003100], [60003100], [7001100], [4010100]); then
+    FFMPEG_VERSION="6.0"
+elif FFMPEG_LIBS_COMPATIBLE([57017100], [59018100], [59016100], [6004100], [4003100]); then
+    FFMPEG_VERSION="5.0"
+elif FFMPEG_LIBS_COMPATIBLE([56014100], [58018100], [58012100], [5001100], [3001100]); then
     FFMPEG_VERSION="4.0"
 elif FFMPEG_LIBS_COMPATIBLE([55078100], [57107100], [57083100], [4008100], [2009100]); then
     FFMPEG_VERSION="3.4"
@@ -348,7 +351,7 @@ elif test $libavutil_VERSION_INT -le 50024000 -a $libavutil_VERSION_INT -ge 4900
 else
     AC_MSG_ERROR([
 
-Unsupported ffmpeg version, most recent version supported is 3.3.
+Unsupported ffmpeg version, most recent version supported is 7.0.
 ])
 fi
 AX_EXTRACT_VERSION(FFMPEG, $FFMPEG_VERSION)
@@ -376,6 +379,15 @@ PKG_VERSION([libprojectM], [$libprojectM_PKG])
 if [[ "$libprojectM_VERSION_MAJOR" -ge 3 ]] ; then
 	AC_MSG_FAILURE([libprojectM >= 3 not yet supported])
 fi
+if [[ "$libprojectM_VERSION_MAJOR" -eq 1 ]] && [[ "${#libprojectM_VERSION_MAJOR}" -eq 2 ]] ; then
+	# The official releases with major = 1 were 1.00, 1.01, 1.10, and 1.2.0.
+	# So 1.10 is in fact 1.1.0 and also uses 1.1 in the ChangeLog file.
+	# This is probably also true for 0.x, where xmms-projectm went from 0.9.1
+	# to 0.91.2 within three days., but that's still a monotonic increase, so
+	# we don't care.
+	libprojectM_VERSION_RELEASE="${libprojectM_VERSION_MINOR#?}"
+	libprojectM_VERSION_MINOR="${libprojectM_VERSION_MINOR%?}"
+fi
 AC_SUBST_DEFINE(HAVE_PROJECTM, $libprojectM_HAVE)
 # get projectM include-dir
 PKG_VALUE([libprojectM], [INCLUDEDIR], [variable=includedir], [$libprojectM_PKG], 
@@ -395,13 +407,14 @@ else
 	libprojectM_USE_CWRAPPER=no
 fi
 AC_SUBST(USE_PROJECTM_CWRAPPER, $libprojectM_USE_CWRAPPER)
+AC_SUBST_DEFINE(USE_LOCAL_PROJECTM_PRESETS, $with_local_projectM_presets)
 
 opencv_core_standalone=no
 opencv_imgproc_standalone=no
 opencv_videoio_standalone=no
 if [[ "$with_opencv_cxx_api" = yes ]] ; then
 	if [[ "$cxx_works" = yes ]] ; then
-		AX_CXX_COMPILE_STDCXX([11])
+		AX_CXX_COMPILE_STDCXX([11], [], [optional])
 		CMAKE_FIND_PACKAGE([OpenCV], [CXX], [GNU], , [OpenCV_HAVE=yes], [OpenCV_HAVE=no])
 		if [[ "$OpenCV_HAVE" != yes ]] ; then
 			PKG_HAVE([OpenCV], [opencv4], no)

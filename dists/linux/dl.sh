@@ -3,24 +3,85 @@
 set -e
 
 declare -a deps
-deps+=('SDL2,https://www.libsdl.org/release/SDL2-2.0.9.tar.gz,4354c6baad9a48486182656a7506abfb63e9bff5')
-deps+=('SDL2_image,https://www.libsdl.org/projects/SDL_image/release/SDL2_image-2.0.4.tar.gz,aed0c6e5feb5ae933410c150d33c319000ea4cfd')
-deps+=('sqlite,https://www.sqlite.org/2018/sqlite-autoconf-3260000.tar.gz,9af2df1a6da5db6e2ecf3f463625f16740e036e9')
-deps+=('yasm,http://www.tortall.net/projects/yasm/releases/yasm-1.3.0.tar.gz,b7574e9f0826bedef975d64d3825f75fbaeef55e')
-deps+=('ffmpeg,https://www.ffmpeg.org/releases/ffmpeg-4.1.tar.xz,40bb9002df044514723e9cca7f0a049eee88fed8')
-deps+=('portaudio,http://www.portaudio.com/archives/pa_stable_v190600_20161030.tgz,56c596bba820d90df7d057d8f6a0ec6bf9ab82e8')
+
+older() {
+	local minver=$1
+	shift
+	set -- `"$@" | tr '\n' ' ' | sed 's/\([^0-9[:space:]][0-9]*\|[[:space:]]\)*\(\<[0-9\.]\+\).*/\2/;s/\./ /g'` 0 0 0
+	local toolver=$(($1 * 1000000 + $2 * 1000 + $3))
+	set -- `echo $minver | sed 's/\./ /g'` 0 0 0
+	local minver=$(($1 * 1000000 + $2 * 1000 + $3))
+	[ $toolver -lt $minver ]
+}
+
+needossl=no
+
+if older 3.5.1 cmake --version && older 3.5.1 cmake3 --version ; then
+	deps+=('cmake,https://github.com/Kitware/CMake/releases/download/v3.25.2/cmake-3.25.2.tar.gz,2f444bb9951aad09452b692d8b3b9e33309e1641')
+	needossl=yes
+fi
+
+if older 0.56 meson --version ; then
+	deps+=('meson,https://github.com/mesonbuild/meson/releases/download/1.0.1/meson-1.0.1.tar.gz,a2d102eb6a37307c9b67283e9764ed57cf286223')
+
+	if older 3.7 python3 --version ; then
+		deps+=('python,https://www.python.org/ftp/python/3.11.2/Python-3.11.2.tar.xz,ae1c199ecb7a969588b15354e19e7b60cb65d1b9')
+		needossl=yes
+	fi
+
+	if older 1.8.2 ninja --version ; then
+		deps+=('ninja,https://github.com/ninja-build/ninja/archive/v1.11.1.tar.gz,938723cdfc7a6f7c8f84c83b9a2cecdf1e5e1ad3')
+	fi
+fi
+
+if [ $needossl = yes ] ; then
+	if older 1.0.2 pkg-config --modversion libssl ; then
+		deps+=('openssl,https://www.openssl.org/source/openssl-1.1.1t.tar.gz,a06b067b7e3bd6a2cb52a06f087ff13346ce7360')
+	fi
+fi
+
+if older 1.8 wayland-scanner --version ; then
+	deps+=('wayland,https://gitlab.freedesktop.org/wayland/wayland/-/releases/1.21.91/downloads/wayland-1.21.91.tar.xz,d4f5b5e2453d45902016138dae0605cae096e00b')
+fi
+
+deps+=('pulseaudio,https://freedesktop.org/software/pulseaudio/releases/pulseaudio-16.1.tar.xz,7bf3845b522a1da263b6b84a0bc5aa761e49bc87')
+deps+=('pipewire,https://gitlab.freedesktop.org/pipewire/pipewire/-/archive/0.3.66/pipewire-0.3.66.tar.bz2,20c58dd867c33a7d111df69d7ec8d31c45b92a0b')
+deps+=('wayland-protocols,https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.31/downloads/wayland-protocols-1.31.tar.xz,5a84628630598027fab1708f822fc399d9e70b02')
+deps+=('SDL2,https://www.libsdl.org/release/SDL2-2.26.5.tar.gz,ca5d89edc537fd819eddab1f1a86f61e45fcb68b')
+deps+=('SDL2_image,https://www.libsdl.org/projects/SDL_image/release/SDL2_image-2.6.3.tar.gz,f4f616ccbba2f3b41383edb47b449439aa51d443')
+deps+=('sqlite,https://www.sqlite.org/2023/sqlite-autoconf-3410200.tar.gz,f5a8a9ad5552b19fb5a41cf5536c8ab3b9bce82e')
+
+if older 2.14 nasm --version ; then
+	deps+=('nasm,https://www.nasm.us/pub/nasm/releasebuilds/2.16.01/nasm-2.16.01.tar.xz,3ab515b4a7d50b7f8c63406a19070a93dcfdb820')
+fi
+
+deps+=('dav1d,https://downloads.videolan.org/pub/videolan/dav1d/1.1.0/dav1d-1.1.0.tar.xz,f042e5e84a55a60ea439e6afd3e18e1dfcdb6d7b')
+deps+=('ffmpeg,http://ffmpeg.org/releases/ffmpeg-6.0.tar.xz,e934c379c99fb02c3cb7bb89c041ea2c028fb66b')
 deps+=('portmidi,https://sourceforge.net/projects/portmedia/files/portmidi/217/portmidi-src-217.zip,f45bf4e247c0d7617deacd6a65d23d9fddae6117')
 deps+=('portmidi-debian,http://http.debian.net/debian/pool/main/p/portmidi/portmidi_217-6.debian.tar.xz,02e4c6dcfbd35a75913de2acd39be8f0cfd0b244')
-deps+=('freetype,https://download.savannah.gnu.org/releases/freetype/freetype-2.9.1.tar.gz,7498739e34e5dca4c61d05efdde6191ba69a2df0')
-deps+=('libpng,https://download.sourceforge.net/libpng/libpng-1.6.36.tar.xz,aec9548c8319104226cc4c31d1f5e524f1b55295')
-deps+=('zlib,https://zlib.net/zlib-1.2.11.tar.gz,e6d119755acdf9104d7ba236b1242696940ed6dd')
+deps+=('lua,https://www.lua.org/ftp/lua-5.4.5.tar.gz,72e9cd7048f765384ab4c8770e84c5e559e4ec59')
+deps+=('libjpeg-turbo,https://download.sourceforge.net/libjpeg-turbo/libjpeg-turbo-2.1.5.1.tar.gz,3ec9f6a19781a583285d93c2c4653f3dbe845fcc')
+deps+=('libpng,https://download.sourceforge.net/libpng/libpng-1.6.39.tar.xz,3f2386d61eccae211ec4f57899e4ac2ca60d390b')
 # deps+=('libcwrap.h,https://raw.githubusercontent.com/wheybags/glibc_version_header/master/version_headers/force_link_glibc_2.10.2.h,aff0c46cf3005fe15c49688e74df62a9988855a5')
-deps+=('patchelf,https://github.com/NixOS/patchelf/archive/0.9.tar.gz,c068c60a67388fbf9267142516d3a8cd6ffc4397')
-deps+=('opencv,https://github.com/opencv/opencv/archive/4.1.1.tar.gz,a7beeaada9b6c45a389b9aee391e82c092537819')
+
+if ! patchelf 2>&1 | grep -q syntax ; then
+	deps+=('patchelf,https://github.com/NixOS/patchelf/releases/download/0.13.1/patchelf-0.13.1.tar.bz2,5d9c1690c0fbe70c312f43d597e04b6c1eeffc60')
+fi
+
+deps+=('opencv,https://github.com/opencv/opencv/archive/4.7.0.tar.gz,7865fc2ff7267c26b289cda8b479439694fcfb98')
+deps+=('projectm,https://github.com/projectM-visualizer/projectm/releases/download/v2.2.1/projectM-2.2.1.tar.gz,bfd0cb09797384a814c3585b7b0369fc1c8b04fe')
 # if [ -f /.dockerenv ]; then
 # 	deps+=('fpc-x86_64,https://sourceforge.net/projects/freepascal/files/Linux/3.0.4/fpc-3.0.4.x86_64-linux.tar,0720e428eaea423423e1b76a7267d6749c3399f4')
 # 	deps+=('fpc-i686,https://sourceforge.net/projects/freepascal/files/Linux/3.0.4/fpc-3.0.4.i386-linux.tar,0a51364bd1a37f1e776df5357ab5bfca8cc7ddeb')
 # fi
+
+if ! true | zsyncmake -V >/dev/null ; then
+	deps+=('zsync,http://zsync.moria.org.uk/download/zsync-0.6.2.tar.bz2,5e69f084c8adaad6a677b68f7388ae0f9507617a')
+fi
+
+if ! desktop-file-validate -h >/dev/null ; then
+	deps+=('desktop-file-utils,https://www.freedesktop.org/software/desktop-file-utils/releases/desktop-file-utils-0.26.tar.xz,9fd94cb7de302163015fcbc0e157c61323b1205d')
+fi
 
 for i in "${deps[@]}"; do
 	IFS=',' read -a dep <<< "$i"
@@ -74,7 +135,7 @@ for i in "${deps[@]}"; do
 		echo "Extracting $name"
 		rm -rf "deps/$name"
 		mkdir -p "deps/$name"
-		tar -x${compressor}f "deps/dl/$bname" -C "deps/$name" --strip-components=1
+		tar -x${compressor}f "deps/dl/$bname" -C "deps/$name" --strip-components=1 --warning=no-unknown-keyword
 		;;
 
 	*)
@@ -94,3 +155,23 @@ for i in "${deps[@]}"; do
 		;;
 	esac
 done
+
+git_source() {
+	if ! [ -d deps/$1 ] ; then
+		git clone -b $3 --depth 1 --recursive $2 deps/$1
+	else
+		(
+			cd deps/$1
+			git checkout -f $3
+			git submodule update --init -f --checkout --recursive
+			find -name .git | while read a ; do
+				export GIT_DIR=$a
+				export GIT_WORK_TREE=${a%/.git}
+				echo cleaning $GIT_WORK_TREE
+				git clean -d -f -x
+			done
+		)
+	fi
+}
+
+git_source AppImageKit https://github.com/AppImage/AppImageKit 13

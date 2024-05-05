@@ -158,7 +158,9 @@ type
     fAVFrame:     PAVFrame;
     fAVFrameRGB:  PAVFrame;
 
+    {$IF LIBAVCODEC_VERSION < 59000000}
     fFrameBuffer: Pcuint8;  //**< stores a FFmpeg video frame
+    {$ENDIF}
     fFrameTex:    GLuint; //**< OpenGL texture for FrameBuffer
     fFrameTexValid: boolean; //**< if true, fFrameTex contains the current frame
     fTexWidth, fTexHeight: cardinal;
@@ -526,7 +528,9 @@ begin
 
   FFmpegCore := TMediaCore_FFmpeg.GetInstance();
 
+  {$IF LIBAVFORMAT_VERSION < 58027100}
   av_register_all();
+  {$ENDIF}
 end;
 
 function TVideoPlayback_FFmpeg.Finalize(): boolean;
@@ -569,9 +573,7 @@ var
   AudioStreamIndex: integer;
   r_frame_rate: cdouble;
   PossibleCodecs: array of PAVCodec;
-{$IF LIBAVCODEC_VERSION >= 58009100}
-  CodecIterator: pointer;
-{$IFEND}
+  CodecID: TAVCodecID;
 
   function ReduceSize: boolean;
   var
@@ -635,7 +637,6 @@ begin
     Close();
     Exit;
   end;
-  Log.LogInfo('VideoStreamIndex : ' + inttostr(fStreamIndex), 'TVideoPlayback_ffmpeg.Open');
 
   // find video stream
   FFmpegCore.FindStreamIDs(fFormatContext, fStreamIndex, AudioStreamIndex);
@@ -645,13 +646,18 @@ begin
     Close();
     Exit;
   end;
+  Log.LogInfo('VideoStreamIndex : ' + inttostr(fStreamIndex), 'TVideoPlayback_ffmpeg.Open');
 
 {$IF LIBAVFORMAT_VERSION <= 52111000} // <= 52.111.0
   fStream := fFormatContext^.streams[fStreamIndex];
 {$ELSE}
   fStream := PPAVStream(PtrUInt(fFormatContext^.streams) + fStreamIndex * Sizeof(pointer))^;
 {$IFEND}
-  fCodecContext := fStream^.codec;
+{$IF LIBAVFORMAT_VERSION < 59000000}
+  CodecID := fStream^.codec^.codec_id;
+{$ELSE}
+  CodecID := fStream^.codecpar^.codec_id;
+{$ENDIF}
 
   fPreferDTS := false;
   // workaround for FFmpeg bug #6560
@@ -660,38 +666,50 @@ begin
 
   SetLength(PossibleCodecs, 1);
   for fCodec in PreferredCodecs do
-    if fCodec^.id = fCodecContext^.codec_id then
+    if fCodec^.id = CodecID then
     begin
       PossibleCodecs[High(PossibleCodecs)] := fCodec;
       SetLength(PossibleCodecs, Length(PossibleCodecs) + 1);
     end;
-  PossibleCodecs[High(PossibleCodecs)] := avcodec_find_decoder(fCodecContext^.codec_id);
+  PossibleCodecs[High(PossibleCodecs)] := avcodec_find_decoder(CodecID);
 
-{$IF LIBAVCODEC_VERSION >= 4008}
-  fCodecContext^.get_format := @SelectFormat;
-{$ENDIF}
-
-  // set debug options
-  fCodecContext^.debug_mv := 0;
-  fCodecContext^.debug := 0;
-
-  // detect bug-workarounds automatically
-  fCodecContext^.workaround_bugs := FF_BUG_AUTODETECT;
-  // error resilience strategy (careful/compliant/agressive/very_aggressive)
-  //fCodecContext^.error_resilience := FF_ER_CAREFUL; //FF_ER_COMPLIANT;
-  // allow non spec compliant speedup tricks.
-
-  //fCodecContext^.flags2 := CODEC_FLAG2_FAST;
-
-  // Note: avcodec_open() and avcodec_close() are not thread-safe and will
-  // fail if called concurrently by different threads.
   errnum := -1;
   for fCodec in PossibleCodecs do
   begin
     if fCodec = nil then
       continue;
+
+    fCodecContext := FFmpegCore.GetCodecContext(fStream, fCodec);
+    if fCodecContext = nil then
+      continue;
+
+    {$IF LIBAVCODEC_VERSION >= 4008}
+    fCodecContext^.get_format := @SelectFormat;
+    {$ENDIF}
+
+    // set debug options
+    {$IF LIBAVCODEC_VERSION < 58000000}
+    fCodecContext^.debug_mv := 0;
+    {$ENDIF}
+    fCodecContext^.debug := 0;
+
+    // detect bug-workarounds automatically
+    fCodecContext^.workaround_bugs := FF_BUG_AUTODETECT;
+    // error resilience strategy (careful/compliant/agressive/very_aggressive)
+    //fCodecContext^.error_resilience := FF_ER_CAREFUL; //FF_ER_COMPLIANT;
+    // allow non spec compliant speedup tricks.
+
+    //fCodecContext^.flags2 := CODEC_FLAG2_FAST;
+
+    // Note: avcodec_open() and avcodec_close() are not thread-safe and will
+    // fail if called concurrently by different threads.
     FFmpegCore.LockAVCodec();
     try
+        {$IF LIBAVCODEC_VERSION >= 54023000}
+        // by setting this explicitly to 0, it won't default to a single thread
+        fCodecContext^.thread_count := 0;
+        {$IFEND}
+
         {$IF LIBAVCODEC_VERSION >= 53005000}
         errnum := avcodec_open2(fCodecContext, fCodec, nil);
         {$ELSE}
@@ -703,6 +721,9 @@ begin
     if errnum >= 0 then
       Break;
     Log.LogError('Error ' + IntToStr(errnum) + ' returned by ' + fCodec^.name, 'TVideoPlayback_ffmpeg.Open');
+    {$IF LIBAVFORMAT_VERSION >= 59000000}
+    avcodec_free_context(@fCodecContext);
+    {$ENDIF}
   end;
   if (errnum < 0) then
   begin
@@ -739,7 +760,7 @@ begin
     fAspect := fAspect * fCodecContext^.width /
                          fCodecContext^.height;
 
-  {$IF LIBAVFORMAT_VERSION_MAJOR >= 55}
+  {$IF (LIBAVFORMAT_VERSION_MAJOR >= 55) and (LIBAVFORMAT_VERSION_MAJOR < 59)}
   r_frame_rate := av_q2d(av_stream_get_r_frame_rate(fStream));
   {$ELSE}
   r_frame_rate := av_q2d(fStream^.r_frame_rate);
@@ -799,6 +820,7 @@ begin
   fAVFrame := avcodec_alloc_frame();
   fAVFrameRGB := avcodec_alloc_frame();
   {$ENDIF}
+  {$IF LIBAVCODEC_VERSION < 59000000}
   fFrameBuffer := av_malloc(avpicture_get_size(PIXEL_FMT_FFMPEG,
       (fScaledWidth + BUFFER_ALIGN - 1) and -BUFFER_ALIGN, fScaledHeight));
 
@@ -817,6 +839,24 @@ begin
     Close();
     Exit;
   end;
+  {$ELSE}
+  if ((fAVFrame = nil) or (fAVFrameRGB = nil)) then
+  begin
+    Log.LogError('Failed to allocate buffers', 'TVideoPlayback_ffmpeg.Open');
+    Close();
+    Exit;
+  end;
+
+  errnum := av_image_alloc(@fAVFrameRGB^.data[0], @fAVFrameRGB^.linesize[0],
+                           (fScaledWidth + BUFFER_ALIGN - 1) and -BUFFER_ALIGN, fScaledHeight,
+                           PIXEL_FMT_FFMPEG, BUFFER_ALIGN);
+  if (errnum < 0) then
+  begin
+    Log.LogError('av_image_alloc failed: ' + FFmpegCore.GetErrorString(errnum), 'TVideoPlayback_ffmpeg.Open');
+    Close();
+    Exit;
+  end;
+  {$ENDIF}
 
   {$IFDEF UseSWScale}
   // if available get a SWScale-context -> faster than the deprecated img_convert().
@@ -885,8 +925,6 @@ begin
 
   fPboId := 0;
 
-  fAspectCorrection := acoCrop;
-
   fScreen := 1;
 
   fPosX := 0;
@@ -906,23 +944,29 @@ end;
 
 procedure TVideo_FFmpeg.Close;
 begin
-  if (fFrameBuffer <> nil) then
-    av_free(fFrameBuffer);
-  if (fAVFrameRGB <> nil) then
-    av_free(fAVFrameRGB);
-  if (fAVFrame <> nil) then
-    av_free(fAVFrame);
-
-  fAVFrame     := nil;
-  fAVFrameRGB  := nil;
-  fFrameBuffer := nil;
+  {$IF LIBAVCODEC_VERSION < 59000000}
+  av_freep(@fFrameBuffer);
+  {$ELSE}
+  if assigned(fAVFrameRGB) then
+    av_freep(@fAVFrameRGB^.data[0]);
+  {$ENDIF}
+  av_freep(@fAVFrameRGB);
+  {$IF LIBAVCODEC_VERSION >= 57037100}
+  av_frame_free(@fAVFrame);
+  {$ELSE}
+  av_freep(@fAVFrame);
+  {$ENDIF}
 
   if (fCodecContext <> nil) then
   begin
     // avcodec_close() is not thread-safe
     FFmpegCore.LockAVCodec();
     try
+      {$IF LIBAVFORMAT_VERSION < 59000000)}
       avcodec_close(fCodecContext);
+      {$ELSE}
+      avcodec_free_context(@fCodecContext);
+      {$ENDIF}
     finally
       FFmpegCore.UnlockAVCodec();
     end;
@@ -937,8 +981,14 @@ begin
     FFmpegCore.AVFormatCloseInput(@fFormatContext);
     {$IFEND}
 
+  {$IF LIBAVFORMAT_VERSION < 59000000)}
   fCodecContext  := nil;
+  {$ENDIF}
   fFormatContext := nil;
+
+  {$IFDEF UseSWScale}
+  sws_freeContext(fSwScaleContext);
+  {$ENDIF}
 
   if (fPboId <> 0) then
     glDeleteBuffersARB(1, @fPboId);
@@ -1007,6 +1057,19 @@ begin
   // read packets until we have a finished frame (or there are no more packets)
   while (FrameFinished = 0) do
   begin
+    {$IF LIBAVCODEC_VERSION >= 57037100}
+    errnum := avcodec_receive_frame(fCodecContext, fAVFrame);
+    if errnum = 0 then
+      Break;
+    if errnum = AVERROR_EOF then
+    begin
+      fEOF := true;
+      Exit;
+    end;
+    if errnum <> AVERROR(EAGAIN) then
+      Continue;
+    {$ENDIF}
+
     errnum := av_read_frame(fFormatContext, AVPacket);
     if (errnum < 0) then
     begin
@@ -1025,8 +1088,13 @@ begin
       if (avio_feof(pbIOCtx) <> 0) then
       {$IFEND}
       begin
+        {$IF LIBAVCODEC_VERSION < 57037100}
         fEOF := true;
         Exit;
+        {$ELSE}
+        avcodec_send_packet(fCodecContext, nil);
+        Continue;
+        {$ENDIF}
       end;
 
       // check for errors
@@ -1048,15 +1116,16 @@ begin
       {$ELSE}
       fileSize := fFormatContext^.file_size;
       {$IFEND}
-      if ((fileSize <> 0) and (pbIOCtx^.pos >= fileSize)) then
+      if (((fileSize <> 0) and (pbIOCtx^.pos >= fileSize))
+          or (errnum = AVERROR_EOF)) then // LIBAVFORMAT_VERSION >= 56000000 tells us if EOF reached.
       begin
+        {$IF LIBAVCODEC_VERSION < 57037100}
         fEOF := true;
         Exit;
-      end;
-      if (errnum = -541478725) then // LIBAVFORMAT_VERSION >= 56000000 tells us if EOF reached.
-      begin
-        fEOF := true;
-        Exit
+        {$ELSE}
+        avcodec_send_packet(fCodecContext, nil);
+        Continue;
+        {$ENDIF}
       end;
 
       // error occured, log and exit
@@ -1079,9 +1148,11 @@ begin
       {$IF LIBAVFORMAT_VERSION < 52012200)}
       avcodec_decode_video(fCodecContext, fAVFrame,
           frameFinished, AVPacket.data, AVPacket.size);
-      {$ELSE}
+      {$ELSEIF LIBAVCODEC_VERSION < 57037100}
       avcodec_decode_video2(fCodecContext, fAVFrame,
           frameFinished, @AVPacket);
+      {$ELSE}
+      avcodec_send_packet(fCodecContext, @AVPacket);
       {$IFEND}
 
       {$IF LIBAVCODEC_VERSION < 51106000}
@@ -1090,7 +1161,11 @@ begin
     end;
 
     // free the packet from av_read_frame
+    {$IF LIBAVCODEC_VERSION < 59000000}
     av_free_packet( @AVPacket );
+    {$ELSE}
+    av_packet_unref(@AVPacket);
+    {$ENDIF}
   end;
 
   // reset opaque data and update pts
@@ -1103,8 +1178,10 @@ begin
   {$ELSEIF LIBAVCODEC_VERSION < 51105000}
   fCodecContext^.reordered_opaque := AV_NOPTS_VALUE;
   pts := fAVFrame^.reordered_opaque;
-  {$ELSE}
+  {$ELSEIF LIBAVCODEC_VERSION < 57061100}
   pts := fAVFrame^.pkt_pts;
+  {$ELSE}
+  pts := fAVFrame^.pts;
   {$IFEND}
 
   {$IF LIBAVCODEC_VERSION >= 51106000}
@@ -1354,11 +1431,6 @@ begin
   ScreenAspect := fWidth*((ScreenW/Screens)/RenderW)/(fHeight*(ScreenH/RenderH));
 
   case fAspectCorrection of
-    acoStretch: begin
-      ScaledVideoWidth  := fWidth;
-      ScaledVideoHeight := fHeight;
-    end;
-
     acoCrop: begin
       if (ScreenAspect >= fAspect) then
       begin
@@ -1369,6 +1441,11 @@ begin
         ScaledVideoHeight := fHeight;
         ScaledVideoWidth  := fWidth * fAspect/ScreenAspect;
       end;
+    end;
+
+    acoHalfway: begin
+      ScaledVideoWidth  := (fWidth + fWidth * fAspect/ScreenAspect)/2;
+      ScaledVideoHeight := (fHeight + fHeight * ScreenAspect/fAspect)/2;
     end;
 
     acoLetterBox: begin
